@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fi">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v38b</title>
+        <title>History Timeline v39</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v38b</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v39</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -52,6 +52,72 @@
     </div>
 
     <div id="page-footer">© 2025 JL · CC BY 4.0</div>
+
+    <script>
+        // Debug switch via ?debug=1
+        (function () {
+            const u = new URL(location.href);
+            const dbg = u.searchParams.get("debug") === "1";
+            // näkyvä pieni virhepalkki vain debug-tilassa
+            if (dbg) {
+                const bar = document.createElement("div");
+                bar.id = "debug-bar";
+                bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;font:12px/1.4 system-ui;padding:6px 10px;background:#300;color:#fdd;display:none";
+                bar.textContent = "Debug on. Errors will appear here.";
+                document.addEventListener("DOMContentLoaded", () => document.body.appendChild(bar));
+                window.__DBG__ = true;
+                window.addEventListener("error", (e) => {
+                    bar.style.display = "block";
+                    bar.textContent = "Error: " + (e.message || "unknown");
+                    console.error("[timeline:error]", e.message, e.error);
+                });
+                window.addEventListener("unhandledrejection", (e) => {
+                    bar.style.display = "block";
+                    bar.textContent = "Promise error: " + (e.reason && (e.reason.message || e.reason));
+                    console.error("[timeline:promise]", e.reason);
+                });
+                console.log("%c[debug] enabled", "color:#9f9");
+            }
+        })();
+    </script>
+
+    <!-- Lightweight helpers (no side effects). Loaded before timeline.js -->
+    <script>
+        (function () {
+            if (window.Util) return; // avoid double-load
+            const Util = {};
+
+            /** Try/catch wrapper for draw/layout functions. */
+            Util.safe = function safe(fn, label) {
+                try { return (typeof fn === "function") ? fn() : undefined; }
+                catch (err) {
+                    const msg = `[${label}] ${err && err.message ? err.message : err}`;
+                    console.error("[timeline:render]", label, err);
+                    const bar = document.getElementById("debug-bar");
+                    if (bar) { bar.style.display = "block"; bar.textContent = "Render error: " + msg; }
+                }
+            };
+
+            /** Debounce helper. */
+            Util.debounce = function debounce(fn, ms) {
+                let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+            };
+
+            /** Perf timer: logs only when debug (?debug=1) is on. */
+            Util.timed = function timed(label, fn) {
+                const t0 = performance.now();
+                const out = fn();
+                const t1 = performance.now();
+                if (window.__DBG__) console.log(`[perf] ${label}: ${(t1 - t0).toFixed(1)} ms`);
+                return out;
+            };
+
+            /** Clamp helper. */
+            Util.clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+            window.Util = Util;
+        })();
+    </script>
 
     <script src="timeline.js"></script>
 </body>

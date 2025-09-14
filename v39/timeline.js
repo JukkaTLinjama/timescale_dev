@@ -1,7 +1,16 @@
-// timeline.js — v38
-// Huom: tämä korvaa aiemman katkenneen tiedoston v32. Kaikki nimet pidetty yksinkertaisina
-// ja "svg" yms. määritellään vain kerran, jotta "already been declared" ei tule.
-// Akseli = log(time_years). Ala = nykyhetki (1 vuosi), ylös = kaukaisempi menneisyys.
+// timeline.js — v39 
+// switching from v38 to EN as default language
+
+// Safe debug logger (no-op unless ?debug=1 used)
+const DBG = !!window.__DBG__;
+const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
+// Use helpers from window.Util when available; otherwise safe fallbacks.
+const U = window.Util || {};
+const safe = U.safe || ((fn) => (typeof fn === "function" ? fn() : undefined));
+const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : undefined));
+
+// Prevent overlapping renders and allow quick perf timing in debug mode.
+let __isRendering = false;
 
 (() => {
     // v38 viewport fix for iOS Chrome/Safari
@@ -308,7 +317,7 @@
                     .attr("x1", -x + 4).attr("x2", 8).attr("y1", yy).attr("y2", yy).attr("stroke", "#aaa");
                 gg.select("text.event-label")
                     .attr("x", 12).attr("y", yy)
-                    .text(`${e.label} (${formatYear(e.year)})`);
+                    .text(`${e.label} (${(e.year ?? "").toString()})`);
             });
             const merged = sel.merge(ent);
 
@@ -334,10 +343,6 @@
         });
     }
 
-    function formatYear(y) {
-        return (y ?? "").toString();
-    }
-
     function updateZoomIndicator(transform) {
         const H = innerHeight();
         const k = transform.k, ty = transform.y;
@@ -358,9 +363,27 @@
     }
 
     function applyZoom() {
-        drawAxis();
-        drawCards();
-        setZOrder(); // v35: varmistetaan kerrosjärjestys
+        // Re-entrancy guard: if a render is already running, skip this call.
+        if (__isRendering) {
+            if (DBG) console.log("[render] skipped re-entrant applyZoom()");
+            return;
+        }
+        __isRendering = true;
+
+        try {
+            // Wrap draw calls with timing + error safety.
+            if (typeof drawAxis === "function") {
+                timed("drawAxis", () => safe(drawAxis, "drawAxis"));
+            }
+            if (typeof drawCards === "function") {
+                timed("drawCards", () => safe(drawCards, "drawCards"));
+            }
+
+            // Enforce layer order even if a draw step failed.
+            setZOrder();
+        } finally {
+            __isRendering = false;
+        }
     }
 
     // --- zoom käyttäytyminen ---
@@ -585,5 +608,29 @@
     }
 
     // start
-    document.addEventListener("DOMContentLoaded", init);
+    function reportInitError(err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        console.error("[timeline:init]", err);
+        const bar = document.getElementById("debug-bar");
+        if (bar) {
+            bar.style.display = "block";
+            bar.textContent = "Init error: " + msg;
+        } else {
+            alert("Something went wrong while initializing the timeline:\n" + msg);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        try {
+            log("init start");
+            const p = init(); // init on async → voi palauttaa Promisen
+            if (p && typeof p.then === "function") {
+                p.then(() => log("init ok")).catch(reportInitError);
+            } else {
+                log("init ok");
+            }
+        } catch (err) {
+            reportInitError(err);
+        }
+    });
 })();
