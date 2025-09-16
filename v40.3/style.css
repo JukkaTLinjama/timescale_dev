@@ -1,0 +1,345 @@
+
+:root {
+    --bg: #0b0b0c;
+    --fg: #e6e6e6;
+    --muted: #9aa0a6;
+    --accent: #ff8c42;
+    --card: #1a1b1e;
+    --cardText: #f3f3f3;
+    --footer-h: 16px;        /* v33: footerin vakiokorkeus */
+    --header-h: 56px;    /* vakiokorkeusotsikolle, yliajetaan JS:llä */
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    /* v38: EI 100dvh → iOS Chromen bugit pois */
+    overscroll-behavior: none;
+    font-family: sans-serif;
+    background: #6b6a6a;
+    color: #ddd;
+    overflow: hidden;
+    /* ei pystyscrollia */
+    -webkit-overflow-scrolling: touch;
+}
+
+#page-title {
+    margin: 0.4em 1em 0em 1em; /* top right bottom left */
+    padding-right: 30px;
+    /* varaa tila ?-ikonille (24px koko + ~12–20px väli) */
+    padding-bottom: 0.8em;
+        /* "rivi tyhjää" mittautuu oikein */
+    font-size: 1.12em;
+    font-weight: 300;
+    font-stretch: 85%;
+    letter-spacing: 0.2px;
+}
+
+/* v38: jos muuttuvat fontit käytössä (esim. Inter), kavennetaan vielä */
+@supports (font-variation-settings: normal) {
+    #page-title {
+        font-variation-settings: "wght" 320, "wdth" 85;
+    }
+}
+
+#info-toggle {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2000;
+    /* yli kaiken, myös svg */
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    color: #e49a45bc;
+    width: 30px;
+    height: 30px;
+    /* hitbox hieman suurempi */
+    line-height: 30px;
+    text-align: center;
+    border-radius: 8px;
+
+    /* läpikuultava oranssi badge */
+    background: rgba(255, 138, 66, 0.167);
+    /* “accent” ~ #ff8c42, 28% */
+    border: 1px solid rgba(255, 138, 66, 0.119);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.139),
+        0 0 0 2px rgba(255, 140, 66, 0.12) inset;
+    /* ohut hehku */
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#info-box {
+    position: absolute;
+    top: 50px;
+    right: 10px;
+    display: none;
+    max-width: 240px;
+    padding: 8px 12px;
+    background: rgba(40, 40, 40, 0.85);
+    border: 1px solid #555;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+}
+
+#info-box em {
+    /* v38: korjattu virheellinen sisäkkäisyys */
+    font-style: italic;
+    font-weight: 400;
+}
+
+/* v38: info-box linkkien värit tummalla taustalla, hyvä kontrasti */
+#info-box a {
+    color: #89723b;
+    /* lämmin keltainen/oranssi */
+    text-decoration-thickness: 1.5px;
+}
+
+#info-box a:hover {
+    color: #FFB703;
+    /* kirkkaampi hover */
+}
+
+#info-box a:visited {
+    color: #c6b291;
+    /* hivenen tummempi visited */
+}
+
+#info-box a:focus-visible {
+    outline: 2px solid #FFB703;
+    /* näppis-/kosk. fokus näkyy */
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+#timeline-container {
+    position: fixed;
+    /* v38.fix: täyttää ruudun ilman vh/dvh-ongelmaa */
+    inset: calc(env(safe-area-inset-top) + var(--header-h)) 8px calc(env(safe-area-inset-bottom) + var(--footer-h)) 8px;
+    /* top right bottom left */
+    height: auto;
+    /* ei korkeuden laskentaa → selainpalkit eivät sotke */
+    margin: 0;
+    background: #474646;
+    border: 1px solid #211f1f;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#timeline {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: pan-y;
+}
+
+#page-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--footer-h);
+    line-height: var(--footer-h);    /* vakio rivikorkeus */
+    display: block;
+    text-align: center;
+    padding: 0 8px;
+    margin: 0;
+    background: transparent;
+    backdrop-filter: none;
+    border-top: none;
+    font-size: 8px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;    /* ei rivinvaihtoa */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px));    /* v37: ettei teksti jää loven alle */
+}
+
+/* Kortit ja akselit */
+.axis line,
+.axis path {
+    stroke: #bbbaba;
+}
+
+.axis text {
+    fill: #c9c9c9;
+    font-size: 11px;
+}
+/* v36: major-tickien viivat selkeämmiksi, mutta hillityt */
+.axis .tick line {
+    stroke: #cfcfcf;
+    stroke-opacity: 0.7;
+    stroke-width: 1;
+}
+.minor-grid line {
+    stroke: #d4d3d3;
+    stroke-opacity: 0.75;    /* selvästi himmeämpi kuin major */
+    shape-rendering: crispEdges;
+}
+
+.zoomBar .track {
+    fill: #999;
+    opacity: 0.1;    /* haalea tausta */
+    pointer-events: none; /* ei blokkaa mitään */
+}
+
+/* v36: ikkuna ei peitä sisältöä — kevyempi & klikit läpi */
+.zoomBar .window {
+    fill: var(--accent);
+    opacity: 0.25;
+    stroke: var(--accent);
+    pointer-events: none;
+    /* varmistetaan ettei nappaa klikkejä */
+}
+
+g.card rect {
+    /* ÄLÄ aseta filliä täällä → JS:n d.color näkyy */
+    stroke: #2a2c30;
+    rx: 8;
+    ry: 8;
+    vector-effect: non-scaling-stroke;
+
+    /* pehmeä korostusvalmius */
+    transition: fill-opacity .35s ease, stroke-opacity .35s ease, filter .35s ease;
+}
+
+g.card.active rect {
+    fill-opacity: 0.85;
+    /* korostus */
+    stroke-opacity: 0.55;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
+}
+
+.card-group text {
+    fill: #c2c0c0;
+    font-size: 10px;
+}
+
+/* v35: vielä pienempi mobiilissa */
+@media (max-width: 480px) {
+    .card-group text.event-label {
+        font-size: 8px;
+    }
+}
+
+.event-label {
+    fill: #dedede;
+    /* tapahtumien tekstit */
+    font-family: Georgia, "Times New Roman", serif;
+    /* pakota serif */
+        font-size: 9px;
+            /* pienempi desktopilla */
+            letter-spacing: .1px;
+            /* pieni luettavuus-tweak */
+}
+
+.card-title {
+    fill: #d7d5d5;    /* teemojen otsikot korteissa */
+    font-weight: bold;
+}
+
+@media (max-width: 480px) {
+    #page-title {
+        font-size: 1.1em;
+    }
+
+    .axis text,
+    .card-group text {
+        font-size: 11px;
+    }}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+}
+
+#plot-rect {
+    fill: none !important;
+    stroke: none !important;
+}
+
+/* v36: globaali haalennuskerros */
+.global-dim-rect {
+    fill: #bcbbbb;
+    opacity: 0;
+    /* näkyy vain kun activeTheme on */
+    pointer-events: none;
+    /* klikkaukset menevät läpi passiivisiin kortteihin */
+    transition: opacity .12s ease;
+}
+/* v37: vakiohimmennys korttiryhmille, ei kerry zoomissa */
+.card-group.inactive {
+    opacity: 1 !important;
+    /* estä opasitin kertautuminen */
+    filter: brightness(0.55);
+    /* tasainen tumma, ei riipu zoomista */
+}
+
+.card-group.inactive .card {
+    fill-opacity: 1;
+    /* vältetään fill-opacity * filter -kertaantuminen */
+}
+
+/* v38: estä iOS/Android copy/select/callout aikajanan alueella */
+#timeline-container,
+#timeline,
+#timeline * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    /* iOS long-press menu pois */
+    -webkit-tap-highlight-color: transparent;
+    /* poista sininen highlight */
+}
+
+/* jätä infolaatikon tekstit valittaviksi */
+#info-box,
+#info-box * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+/* v40: Zoom bar is indicator-only; let all input pass through it */
+svg .zoomBar,
+svg .zoomBar .track,
+svg .zoomBar .window,
+svg .zoomBar .hit {
+    pointer-events: none;
+}
+/* v40: Dim only inactive cards; no global wash over empty background */
+g.card.inactive {
+    opacity: 1 !important;
+    /* don't compound with child opacities */
+    filter: brightness(0.55);
+}
+
+g.card.inactive rect {
+    fill-opacity: 1;
+    /* prevent double-dimming with fill-opacity */
+}
+/* v40.3 — subtle contrast between active/inactive */
+.card-group.active {
+    opacity: 1;
+}
+
+.card-group.inactive {
+    opacity: 0.45;
+    transition: opacity 160ms ease;
+}
+
+/* keep active on top in CSS stacking contexts */
+.card-group.active {
+    isolation: isolate;
+}
