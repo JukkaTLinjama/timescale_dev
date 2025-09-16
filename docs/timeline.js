@@ -1,7 +1,16 @@
-// timeline.js — v38
-// Huom: tämä korvaa aiemman katkenneen tiedoston v32. Kaikki nimet pidetty yksinkertaisina
-// ja "svg" yms. määritellään vain kerran, jotta "already been declared" ei tule.
-// Akseli = log(time_years). Ala = nykyhetki (1 vuosi), ylös = kaukaisempi menneisyys.
+// timeline.js — v40.2
+// switching from v38 to EN as default language
+
+// Safe debug logger (no-op unless ?debug=1 used)
+const DBG = !!window.__DBG__;
+const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
+// Use helpers from window.Util when available; otherwise safe fallbacks.
+const U = window.Util || {};
+const safe = U.safe || ((fn) => (typeof fn === "function" ? fn() : undefined));
+const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : undefined));
+
+// Prevent overlapping renders and allow quick perf timing in debug mode.
+let __isRendering = false;
 
 (() => {
     // v38 viewport fix for iOS Chrome/Safari
@@ -87,13 +96,6 @@
     // v36: ikkuna alimman tason track-ryhmään → ei peitä sisältöä
     const zoomWin = gZoomTrack.append("rect").attr("class", "window").attr("rx", 3).attr("ry", 3);
 
-    // leveä näkymätön tartunta-alue (drag)
-    const HIT_PAD_LEFT = 14, HIT_PAD_RIGHT = 14, HIT_EXTRA_RIGHT_SCALE = 1.0, HIT_SCALE = 1.15;
-    const zoomHit = gZoom.append("rect")
-        .attr("class", "hit")
-        .style("pointer-events", "all");
-    zoomHit.attr("opacity", 0); // varmistus: hitbox ei koskaan näy
-
     // v36: varmista kerrosjärjestys heti luontivaiheessa
     setZOrder();
 
@@ -101,9 +103,8 @@
     function setZOrder() {
         gZoomTrack.lower(); // alin: kapea zoombar-tausta
         gRoot.raise();      // kaikki kortit & akseli (passiivinen sisältö)
-        gDim.raise();       // haalistuslayer passiivisen päälle
+        // gDim.raise();      // ← no need to raise: global overlay stays off
         gActive.raise();    // aktiivinen kortti overlayn yläpuolelle
-        gZoom.raise();      // päällimmäisenä vain hitbox/drag
         gAxis.raise();   // v37 fix: akseli + tikit overlayn yläpuolelle
     }
 
@@ -129,25 +130,33 @@
 
         zoomBG.attr("x", 0).attr("y", 0).attr("width", cfg.zoomBar.width).attr("height", innerH);
         zoomWin.attr("x", 2).attr("width", cfg.zoomBar.width - 4).attr("y", 0).attr("height", innerH - 1);
-        // v36: klippireuna (KUMPIKIN clipPath) samaan koordinaatistoon kuin gCards (origin 0,0)
-        d3.select("#plot-rect")
-            .attr("x", 0)
-            .attr("y", 0)
-            .attr("width", innerWidth())
-            .attr("height", innerHeight()); 
-            zoomBehavior.translateExtent([[0, -2000], [innerWidth(), innerH + 2000]]); // v38: reilu pystybufferi
-        // v36: overlay vain sisäalueelle, jätä akselille 2px rako
+        // v40: global dim overlay — covers the content area from the axis gap to the right edge.
+        // It deliberately leaves the left y-axis visible.
         const axisGap = 2;
+        const contentLeft = rootTX + axisGap;
+        // Use the actual svg width so cards don't get clipped on the right;
+        // keep a tiny 8px padding to the container's border.
+        const contentWidthSVG = Math.max(0, state.width - contentLeft - 8);
+
         dimRect
-            .attr("x", rootTX + axisGap)
+            .attr("x", contentLeft)
             .attr("y", 0)
-            .attr("width", innerWidth() - axisGap)
+            .attr("width", contentWidthSVG)
             .attr("height", state.height);
-        //  päivitä klippireuna näkyvään piirtoalueeseen
+
+        // Update clip to the same visual width but in gCards' local coordinates (origin at 0).
+        const clipWidthLocal = Math.max(0, state.width - rootTX - 8);
         plotClipRect
             .attr("x", 0)
             .attr("y", 0)
-            .attr("width", innerWidth())
+            .attr("width", clipWidthLocal)
+            .attr("height", innerHeight());
+
+        // Keep the extra safety for the other clipPath variant used earlier in init()
+        d3.select("#plot-rect")
+            .attr("x", 0)
+            .attr("y", 0)
+            .attr("width", clipWidthLocal)
             .attr("height", innerHeight());
 
         setZOrder();  // v35: varmistetaan ettei track koskaan peitä tekstejä
@@ -251,6 +260,7 @@
         ent.append("text").attr("class", "card-title").attr("x", 8).style("font-weight", "bold");
         ent.append("g").attr("class", "events");
         sel.exit().remove();
+        const merged = sel.merge(ent);
 
         sel.merge(ent).each(function (d, i) {
             const g = d3.select(this);
@@ -279,9 +289,11 @@
                 .attr("fill", d.color).attr("fill-opacity", 0.55)
                 .attr("stroke", "#999").attr("stroke-opacity", 0.25);
 
-            // v36: luokittele active/inactive klikatun teeman mukaan
-            const isActive = !state.activeTheme || state.activeTheme === d.theme;
-            g.classed("active", isActive).classed("inactive", !isActive);
+            // v40: Only mark a card active when a theme is selected.
+            // No selection = neutral (neither .active nor .inactive).
+            const hasActive = !!state.activeTheme;
+            g.classed("active", hasActive && state.activeTheme === d.theme)
+                .classed("inactive", hasActive && state.activeTheme !== d.theme);
 
             // v36: otsikko “sticky” yläreunaan, mutta piiloon jos kortti kokonaan ulkona
             const viewH = innerHeight();
@@ -308,34 +320,31 @@
                     .attr("x1", -x + 4).attr("x2", 8).attr("y1", yy).attr("y2", yy).attr("stroke", "#aaa");
                 gg.select("text.event-label")
                     .attr("x", 12).attr("y", yy)
-                    .text(`${e.label} (${formatYear(e.year)})`);
+                    .text(`${e.label} (${(e.year ?? "").toString()})`);
             });
-            const merged = sel.merge(ent);
-
-            // klikkaus: aktivoi / tyhjennä
-            merged.on("click", (event, d) => {
-                state.activeTheme = (state.activeTheme === d.theme) ? null : d.theme;
-                drawCards();
-            });
-
-            // siirrä VANHA aktiivinen takaisin ja nosta VAIN tämänhetkinen aktiivinen overlayn yläpuolelle
-            while (gActive.node().firstChild) gCards.node().appendChild(gActive.node().firstChild);
-
-            if (state.activeTheme) {
-                merged.filter(d => d.theme === state.activeTheme).each(function () {
-                    gActive.node().appendChild(this);
-                });
-                dimRect.style("opacity", 0.45);     // globaali haalennus päälle
-                merged.classed("inactive", d => d.theme !== state.activeTheme);  // (valinnainen luokitus)
-            } else {
-                dimRect.style("opacity", 0);        // overlay pois
-                merged.classed("inactive", false);
-            }
+            // v40: ensure correct z-order right after toggling activation.
+            // dim overlay (gDim) must sit above passive cards (gRoot) but below active ones (gActive).
+            setZOrder();
         });
-    }
+        // Click to toggle active theme
+        merged.on("click", (event, d) => {
+            state.activeTheme = (state.activeTheme === d.theme) ? null : d.theme;
+            drawCards();
+        });
 
-    function formatYear(y) {
-        return (y ?? "").toString();
+        // Move previous active back to cards, then lift the current active once.
+        while (gActive.node().firstChild) {
+            gCards.node().appendChild(gActive.node().firstChild);
+        }
+
+        if (state.activeTheme) {
+            merged.filter(d => d.theme === state.activeTheme).each(function () {
+                gActive.node().appendChild(this);
+            });
+        }
+
+        // v40: ensure layer order right after activation change
+        setZOrder();
     }
 
     function updateZoomIndicator(transform) {
@@ -344,23 +353,30 @@
         const winH = H / k;
         const winY = Math.max(0, Math.min(-ty / k, H - winH));
         zoomWin.attr("y", winY).attr("height", winH);
-
-        // hitbox leveämmäksi ja hiukan korkeammaksi
-        const winX = (+zoomWin.attr("x") || 2);
-        const winW = (+zoomWin.attr("width") || (cfg.zoomBar.width - 4));
-        const hitH = Math.min(H, winH * HIT_SCALE);
-        let hitY = winY - (hitH - winH) / 2;
-        hitY = Math.max(0, Math.min(hitY, H - hitH));
-        const hitX = winX - HIT_PAD_LEFT;
-        const hitW = winW * (1 + HIT_EXTRA_RIGHT_SCALE) + HIT_PAD_LEFT + HIT_PAD_RIGHT;
-
-        zoomHit.attr("x", hitX).attr("y", hitY).attr("width", hitW).attr("height", hitH);
     }
 
     function applyZoom() {
-        drawAxis();
-        drawCards();
-        setZOrder(); // v35: varmistetaan kerrosjärjestys
+        // Re-entrancy guard: if a render is already running, skip this call.
+        if (__isRendering) {
+            if (DBG) console.log("[render] skipped re-entrant applyZoom()");
+            return;
+        }
+        __isRendering = true;
+
+        try {
+            // Wrap draw calls with timing + error safety.
+            if (typeof drawAxis === "function") {
+                timed("drawAxis", () => safe(drawAxis, "drawAxis"));
+            }
+            if (typeof drawCards === "function") {
+                timed("drawCards", () => safe(drawCards, "drawCards"));
+            }
+
+            // Enforce layer order even if a draw step failed.
+            setZOrder();
+        } finally {
+            __isRendering = false;
+        }
     }
 
     // --- zoom käyttäytyminen ---
@@ -380,24 +396,6 @@
             updateZoomIndicator(t);
             applyZoom();
         });
-
-    function attachZoomDragging() {
-        // raahaa zoomWin → muunna drag screen-y → zoom translate
-        zoomWin.call(d3.drag().on("drag", (event) => {
-            const H = innerHeight() - 1;
-            const t = d3.zoomTransform(svg.node());
-            const k = Math.max(t.k, 1e-6);
-            const curY = (+zoomWin.attr("y") || 0);
-
-            // sama clamp kuin indikaattorissa
-            const rawH = H / k;
-            const winH = Math.max(8, Math.min(H, rawH));
-
-            let newY = Math.max(0, Math.min(curY + event.dy, H - winH));
-            const newTranslateY = -newY * k;
-            svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(0, newTranslateY).scale(k));
-        }));
-    }
 
     // --- data ---
     async function loadData() {
@@ -487,19 +485,6 @@
         // zoom extents
         svg.call(zoomBehavior);
         zoomBehavior.translateExtent([[0, -2000], [innerWidth(), innerHeight() + 2000]]); // v38: reilu pystybufferi
-        attachZoomDragging();
-        zoomHit.call(
-            d3.drag().on("drag", (event) => {
-                const H = innerHeight();
-                const t = d3.zoomTransform(svg.node());
-                const k = t.k;
-                const curY = (+zoomWin.attr("y") || 0);
-                const winH = H / k;
-                let newY = Math.max(0, Math.min(curY + event.dy, H - winH));
-                const newTranslateY = -newY * k;
-                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(0, newTranslateY).scale(k));
-            })
-        );
 
         // lataa & piirrä
         await loadData();
@@ -536,10 +521,11 @@
             const maxT = 0;
             newY = Math.max(minT, Math.min(maxT, newY));
 
-            // 1) aktivoi kortti viiveellä
+            // v40: Drive activation through state so class logic stays consistent.
             d3.timeout(() => {
-                const sel = gCards.selectAll("g.card").filter(d => d.theme === "ihmiskunta");
-                sel.classed("active", true).raise();
+                state.activeTheme = "ihmiskunta";
+                drawCards();     // re-render to apply classes and move the node to gActive
+                setZOrder();
             }, ACTIVATE_DELAY);
 
             // 2) zoomaa myöhemmin
@@ -568,7 +554,10 @@
             const tBefore = d3.zoomTransform(svg.node());
             layout();
             svg.call(zoomBehavior);
-            zoomBehavior.translateExtent([[0, -2000], [state.width, state.height + 2000]]);
+            // v40: clamp panning/zooming to the visible content box (no overscroll).
+            const H = innerHeight();
+            zoomBehavior.extent([[0, 0], [state.width, H]])
+                .translateExtent([[0, 0], [state.width, H]]);
 
             // käytä ajantasaista transformia indikaattoriin & piirtoon
             const tNow = d3.zoomTransform(svg.node());
@@ -585,5 +574,29 @@
     }
 
     // start
-    document.addEventListener("DOMContentLoaded", init);
+    function reportInitError(err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        console.error("[timeline:init]", err);
+        const bar = document.getElementById("debug-bar");
+        if (bar) {
+            bar.style.display = "block";
+            bar.textContent = "Init error: " + msg;
+        } else {
+            alert("Something went wrong while initializing the timeline:\n" + msg);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        try {
+            log("init start");
+            const p = init(); // init on async → voi palauttaa Promisen
+            if (p && typeof p.then === "function") {
+                p.then(() => log("init ok")).catch(reportInitError);
+            } else {
+                log("init ok");
+            }
+        } catch (err) {
+            reportInitError(err);
+        }
+    });
 })();

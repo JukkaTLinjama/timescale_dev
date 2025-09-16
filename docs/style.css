@@ -315,3 +315,21 @@ body {
     user-select: text;
     -webkit-touch-callout: default;
 }
+/* v40: Zoom bar is indicator-only; let all input pass through it */
+svg .zoomBar,
+svg .zoomBar .track,
+svg .zoomBar .window,
+svg .zoomBar .hit {
+    pointer-events: none;
+}
+/* v40: Dim only inactive cards; no global wash over empty background */
+g.card.inactive {
+    opacity: 1 !important;
+    /* don't compound with child opacities */
+    filter: brightness(0.55);
+}
+
+g.card.inactive rect {
+    fill-opacity: 1;
+    /* prevent double-dimming with fill-opacity */
+}
