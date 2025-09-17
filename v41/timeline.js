@@ -635,6 +635,42 @@ let __isRendering = false;
         setZOrder();                 // heti ensimmäisen piirron jälkeen
         requestAnimationFrame(setZOrder); // varmuus: myös seuraavassa framessa
 
+        // v41 API: expose minimal controls for external (index.html) animation
+        window.TimelineAPI = {
+            // instant zoom/pan
+            scaleBy(factor, x, y) { svg.call(zoomBehavior.scaleBy, factor, [x, y]); },
+            translateBy(dx, dy) { svg.call(zoomBehavior.translateBy, dx || 0, dy || 0); },
+
+            // animated zoom/pan
+            animScaleBy(factor, x, y, dur) {
+                svg.transition().duration(dur || 600).ease(d3.easeCubicOut)
+                    .call(zoomBehavior.scaleBy, factor, [x, y]);
+            },
+            animTranslateBy(dx, dy, dur) {
+                svg.transition().duration(dur || 600).ease(d3.easeCubicOut)
+                    .call(zoomBehavior.translateBy, dx || 0, dy || 0);
+            },
+
+            // select theme (as if user clicked)
+            selectTheme(name) {
+                state.activeTheme = name || null;
+                drawCards();
+                setZOrder();
+            },
+
+            // a convenient screen anchor near center-right
+            getCenter() {
+                const r = container.getBoundingClientRect();
+                return {
+                    x: Math.round(r.left + r.width * 0.60),
+                    y: Math.round(r.top + r.height * 0.50)
+                };
+            }
+        };
+
+        // notify page scripts that timeline is ready for scripted animation
+        document.dispatchEvent(new CustomEvent("timeline:ready"));
+
         // estä contextmenu + selectstart timeline-containerissa
         const tl = document.getElementById("timeline-container");
         ["contextmenu", "selectstart"].forEach(ev =>
@@ -644,40 +680,6 @@ let __isRendering = false;
         d3.select("#timeline").on("pointerdown", () => {
             if (window.getSelection) { try { window.getSelection().removeAllRanges(); } catch (e) { } }
         });
-
-        // v38: autofocus "ihmiskunta" – aktivointi viiveellä, zoom myöhemmin
-        const human = state.events.filter(e => e.theme === "ihmiskunta");
-        if (human.length) {
-            // laske zoom-kohde
-            const ys = human.map(e => state.y(e.time_years));
-            const midLocal = (d3.min(ys) + d3.max(ys)) / 2;   // gRoot-koord.
-            const midScreen = cfg.margin.top + midLocal;      // ruutukoord.
-            const k = 3;
-            const Hscreen = state.height;
-            const innerH = innerHeight();
-
-            let newY = -midScreen * k + Hscreen / 2;
-            const minT = Math.min(0, Hscreen - innerH * k);
-            const maxT = 0;
-            newY = Math.max(minT, Math.min(maxT, newY));
-
-            // v40: Drive activation through state so class logic stays consistent.
-            d3.timeout(() => {
-                state.activeTheme = "ihmiskunta";
-                drawCards();     // re-render to apply classes and move the node to gActive
-                setZOrder();
-            }, ACTIVATE_DELAY);
-
-            // 2) zoomaa myöhemmin
-            d3.timeout(() => {
-                autoZooming = true;
-                svg.transition()
-                    .duration(900)
-                    .ease(d3.easeCubicOut)
-                    .call(zoomBehavior.transform, d3.zoomIdentity.translate(0, newY).scale(k))
-                    .on("end", () => { autoZooming = false; });
-            }, ZOOM_DELAY);
-        }
 
         const ro = new ResizeObserver(() => {
             // 1) v38: mittaa H1 + margin-bottom → --header-h

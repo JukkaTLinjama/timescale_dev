@@ -1,4 +1,4 @@
-// timeline.js — v40.2
+// timeline.js — v41
 // switching from v38 to EN as default language
 
 // Safe debug logger (no-op unless ?debug=1 used)
@@ -46,7 +46,7 @@ let __isRendering = false;
         margin: { top: 12, right: 54, bottom: 12, left: 54 },
         zoomBar: { width: 22, gap: 10 },     // oikean reunan zoom-palkki
         card: { minW: 160, pad: 10 },
-        palette: ["#b6c8d4", "#70a8c6", "#4b9fa8", "#4dbc82", "#7be2a3"] // korttien värit
+        palette: ["#6372b2ff", "#70a8c6", "#4b9fa8", "#368d60ff", "#5a9646ff"] // korttien värit
     };
     const ACTIVATE_DELAY = 1000; // ms ennen kuin kortti saa .active
     const ZOOM_DELAY = 1500;     // ms ennen zoom-animaatiota (säilytettiin pyyntösi mukaisena)
@@ -106,6 +106,11 @@ let __isRendering = false;
         // gDim.raise();      // ← no need to raise: global overlay stays off
         gActive.raise();    // aktiivinen kortti overlayn yläpuolelle
         gAxis.raise();   // v37 fix: akseli + tikit overlayn yläpuolelle
+    }
+    // v41: smooth incremental scale around a given screen point (x,y)
+    function scaleByAt(selection, zoomBehavior, factor, x, y) {
+        // Use D3's built-in zoom.scaleBy with a specific pointer anchor
+        selection.call(zoomBehavior.scaleBy, factor, [x, y]);
     }
 
     function layout() {
@@ -251,6 +256,11 @@ let __isRendering = false;
             };
         });
 
+        // v40.3 fix: ensure previous active participates in the join/class update
+        while (gActive.node().firstChild) {
+            gCards.node().appendChild(gActive.node().firstChild);
+        }
+
         const indent = 20;
         const sel = gCards.selectAll("g.card").data(data, d => d.theme);
         const ent = sel.enter().append("g").attr("class", "card");
@@ -326,25 +336,32 @@ let __isRendering = false;
             // dim overlay (gDim) must sit above passive cards (gRoot) but below active ones (gActive).
             setZOrder();
         });
-        // Click to toggle active theme
-        merged.on("click", (event, d) => {
-            state.activeTheme = (state.activeTheme === d.theme) ? null : d.theme;
-            drawCards();
+
+        // v40.3: change active only on click (single source of truth = state.activeTheme)
+        merged.on("click", function (event, d) {
+            event.preventDefault();     // NEW
+            event.stopPropagation();    // NEW
+
+            if (state.activeTheme === d.theme) return; // no toggle-off
+            state.activeTheme = d.theme;               // set new active
+            drawCards();                               // re-render → classes & move to gActive
+            setZOrder();                               // keep layers correct
         });
+        merged.on("dblclick", function (event) { event.preventDefault(); event.stopPropagation(); }); 
 
         // Move previous active back to cards, then lift the current active once.
         while (gActive.node().firstChild) {
             gCards.node().appendChild(gActive.node().firstChild);
         }
 
+        // v40.3: lift the current active once (previous active was returned before the join)
         if (state.activeTheme) {
-            merged.filter(d => d.theme === state.activeTheme).each(function () {
-                gActive.node().appendChild(this);
-            });
+            merged
+                .filter(d => d.theme === state.activeTheme)
+                .each(function () { gActive.node().appendChild(this); });
         }
 
-        // v40: ensure layer order right after activation change
-        setZOrder();
+        setZOrder();         // v40: ensure layer order right after activation change
     }
 
     function updateZoomIndicator(transform) {
@@ -377,6 +394,127 @@ let __isRendering = false;
         } finally {
             __isRendering = false;
         }
+    }
+    // v41: touch-swipe zoom + desktop "press+drag" zoom (mouse/trackpad)
+    // - Touch: yhden sormen vaakaliike -> zoom (ankkuroitu sormen kohtaan)
+    // - Desktop: vasen painike alas + vaakaliike -> zoom (ei vaikuta pan-vedon ilman painallusta)
+    function setupGlobalSwipeZoom(svgSel, zoomBehavior) {
+        const DEADZONE = 2;          // px, ignore jitter
+        const SENS_TOUCH = 0.012;    // scale per px (touch)
+        const SENS_MOUSE = 0.006;    // scale per px (mouse/trackpad)
+        const DOMINANCE = 1.25;      // |dx| must dominate |dy| by this factor to activate on mouse
+
+        // --- Touch (real touch pointers only) ---
+        let touchActive = false;
+        let touchLastX = 0;
+
+        function isTouch(e) { return e.pointerType === 'touch'; }
+
+        svgSel.node().addEventListener('pointerdown', (e) => {
+            if (!e.isPrimary) return;
+
+            if (isTouch(e)) {
+                touchActive = true;
+                touchLastX = e.clientX;
+                try { e.target.setPointerCapture(e.pointerId); } catch { }
+            }
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('pointermove', (e) => {
+            if (!e.isPrimary) return;
+
+            if (isTouch(e) && touchActive) {
+                const dx = e.clientX - touchLastX;
+                if (Math.abs(dx) >= DEADZONE) {
+                    touchLastX = e.clientX;
+                    const factor = 1 + (dx * SENS_TOUCH); // right = zoom in
+                    svgSel.call(zoomBehavior.scaleBy, factor, [e.clientX, e.clientY]);
+                    // estä d3.zoom drag-pan kosketuksella
+                    e.stopPropagation();
+                }
+            }
+        }, { passive: true, capture: true });
+
+        function endTouch() { touchActive = false; }
+        svgSel.node().addEventListener('pointerup', endTouch, { passive: true, capture: true });
+        svgSel.node().addEventListener('pointercancel', endTouch, { passive: true, capture: true });
+        svgSel.node().addEventListener('lostpointercapture', endTouch, { passive: true, capture: true });
+
+        // --- Desktop (mouse/trackpad): press + horizontal drag -> zoom ---
+        let mousePending = false;  // waiting to decide (zoom vs pan)
+        let mouseActive = false;   // actively zooming
+        let mStartX = 0, mStartY = 0, mLastX = 0;
+
+        svgSel.node().addEventListener('pointerdown', (e) => {
+            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
+            // Only when left button is pressed
+            if ((e.buttons & 1) === 1) {
+                mousePending = true;
+                mouseActive = false;
+                mStartX = mLastX = e.clientX;
+                mStartY = e.clientY;
+                // älä vielä pysäytä tapahtumaa: annetaan d3.zoom:lle mahdollisuus pan-ohjaukseen,
+                // aktivoimme zoomin vasta kun vaakaliike selvästi dominoi.
+            }
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('pointermove', (e) => {
+            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
+
+            // if button released mid-gesture, end
+            if ((e.buttons & 1) !== 1) {
+                mousePending = false;
+                mouseActive = false;
+                return;
+            }
+
+            const dx = e.clientX - mLastX;
+            const totDX = e.clientX - mStartX;
+            const totDY = e.clientY - mStartY;
+
+            if (mousePending) {
+                // decide gesture: horizontal-dominant drag becomes zoom, else let pan happen
+                if (Math.abs(totDX) >= DEADZONE && Math.abs(totDX) > Math.abs(totDY) * DOMINANCE) {
+                    mousePending = false;
+                    mouseActive = true;
+                    try { e.target.setPointerCapture(e.pointerId); } catch { }
+                    // from now on, we claim the gesture and block d3.zoom’s drag-pan
+                    e.stopPropagation();
+                } else {
+                    // not decided as zoom; let d3 handle normally (pan)
+                    mLastX = e.clientX;
+                    return;
+                }
+            }
+
+            if (mouseActive) {
+                if (Math.abs(dx) >= DEADZONE) {
+                    mLastX = e.clientX;
+                    const factor = 1 + (dx * SENS_MOUSE); // right = zoom in
+                    svgSel.call(zoomBehavior.scaleBy, factor, [e.clientX, e.clientY]);
+                }
+                // prevent d3.zoom from panning during our zoom mode
+                e.stopPropagation();
+            }
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('pointerup', (e) => {
+            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
+            mousePending = false;
+            mouseActive = false;
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('pointercancel', (e) => {
+            if (e.pointerType !== 'mouse') return;
+            mousePending = false;
+            mouseActive = false;
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('lostpointercapture', (e) => {
+            if (e.pointerType !== 'mouse') return;
+            mousePending = false;
+            mouseActive = false;
+        }, { passive: true, capture: true });
     }
 
     // --- zoom käyttäytyminen ---
@@ -484,6 +622,8 @@ let __isRendering = false;
 
         // zoom extents
         svg.call(zoomBehavior);
+        setupGlobalSwipeZoom(svg, zoomBehavior); // v41: one-finger horizontal swipe -> zoom
+        svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
         zoomBehavior.translateExtent([[0, -2000], [innerWidth(), innerHeight() + 2000]]); // v38: reilu pystybufferi
 
         // lataa & piirrä
@@ -495,6 +635,42 @@ let __isRendering = false;
         setZOrder();                 // heti ensimmäisen piirron jälkeen
         requestAnimationFrame(setZOrder); // varmuus: myös seuraavassa framessa
 
+        // v41 API: expose minimal controls for external (index.html) animation
+        window.TimelineAPI = {
+            // instant zoom/pan
+            scaleBy(factor, x, y) { svg.call(zoomBehavior.scaleBy, factor, [x, y]); },
+            translateBy(dx, dy) { svg.call(zoomBehavior.translateBy, dx || 0, dy || 0); },
+
+            // animated zoom/pan
+            animScaleBy(factor, x, y, dur) {
+                svg.transition().duration(dur || 600).ease(d3.easeCubicOut)
+                    .call(zoomBehavior.scaleBy, factor, [x, y]);
+            },
+            animTranslateBy(dx, dy, dur) {
+                svg.transition().duration(dur || 600).ease(d3.easeCubicOut)
+                    .call(zoomBehavior.translateBy, dx || 0, dy || 0);
+            },
+
+            // select theme (as if user clicked)
+            selectTheme(name) {
+                state.activeTheme = name || null;
+                drawCards();
+                setZOrder();
+            },
+
+            // a convenient screen anchor near center-right
+            getCenter() {
+                const r = container.getBoundingClientRect();
+                return {
+                    x: Math.round(r.left + r.width * 0.60),
+                    y: Math.round(r.top + r.height * 0.50)
+                };
+            }
+        };
+
+        // notify page scripts that timeline is ready for scripted animation
+        document.dispatchEvent(new CustomEvent("timeline:ready"));
+
         // estä contextmenu + selectstart timeline-containerissa
         const tl = document.getElementById("timeline-container");
         ["contextmenu", "selectstart"].forEach(ev =>
@@ -504,40 +680,6 @@ let __isRendering = false;
         d3.select("#timeline").on("pointerdown", () => {
             if (window.getSelection) { try { window.getSelection().removeAllRanges(); } catch (e) { } }
         });
-
-        // v38: autofocus "ihmiskunta" – aktivointi viiveellä, zoom myöhemmin
-        const human = state.events.filter(e => e.theme === "ihmiskunta");
-        if (human.length) {
-            // laske zoom-kohde
-            const ys = human.map(e => state.y(e.time_years));
-            const midLocal = (d3.min(ys) + d3.max(ys)) / 2;   // gRoot-koord.
-            const midScreen = cfg.margin.top + midLocal;      // ruutukoord.
-            const k = 3;
-            const Hscreen = state.height;
-            const innerH = innerHeight();
-
-            let newY = -midScreen * k + Hscreen / 2;
-            const minT = Math.min(0, Hscreen - innerH * k);
-            const maxT = 0;
-            newY = Math.max(minT, Math.min(maxT, newY));
-
-            // v40: Drive activation through state so class logic stays consistent.
-            d3.timeout(() => {
-                state.activeTheme = "ihmiskunta";
-                drawCards();     // re-render to apply classes and move the node to gActive
-                setZOrder();
-            }, ACTIVATE_DELAY);
-
-            // 2) zoomaa myöhemmin
-            d3.timeout(() => {
-                autoZooming = true;
-                svg.transition()
-                    .duration(900)
-                    .ease(d3.easeCubicOut)
-                    .call(zoomBehavior.transform, d3.zoomIdentity.translate(0, newY).scale(k))
-                    .on("end", () => { autoZooming = false; });
-            }, ZOOM_DELAY);
-        }
 
         const ro = new ResizeObserver(() => {
             // 1) v38: mittaa H1 + margin-bottom → --header-h
@@ -554,6 +696,7 @@ let __isRendering = false;
             const tBefore = d3.zoomTransform(svg.node());
             layout();
             svg.call(zoomBehavior);
+            svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
             // v40: clamp panning/zooming to the visible content box (no overscroll).
             const H = innerHeight();
             zoomBehavior.extent([[0, 0], [state.width, H]])

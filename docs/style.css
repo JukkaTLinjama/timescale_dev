@@ -1,11 +1,11 @@
-
+/* v41 CSS for History Timeline */
 :root {
     --bg: #0b0b0c;
     --fg: #e6e6e6;
     --muted: #9aa0a6;
     --accent: #ff8c42;
     --card: #1a1b1e;
-    --cardText: #f3f3f3;
+    --cardText: #ffffff;
     --footer-h: 16px;        /* v33: footerin vakiokorkeus */
     --header-h: 56px;    /* vakiokorkeusotsikolle, yliajetaan JS:llä */
 }
@@ -141,7 +141,7 @@ body {
     width: 100%;
     height: 100%;
     display: block;
-    touch-action: pan-y;
+    touch-action: pan-y pinch-zoom;  /* allow native pinch; we handle horizontal swipe ourselves */
 }
 
 #page-footer {
@@ -204,20 +204,22 @@ body {
 }
 
 g.card rect {
-    /* ÄLÄ aseta filliä täällä → JS:n d.color näkyy */
-    stroke: #2a2c30;
+    /* fill comes from JS (d.color); keep it untouched */
+    stroke: #474646;
+    /* match the timeline container background for better blend */
+    stroke-opacity: 0.35;
+    /* soften the edge to “melt” into background */
+    stroke-width: 1.5px;
     rx: 8;
     ry: 8;
     vector-effect: non-scaling-stroke;
-
-    /* pehmeä korostusvalmius */
     transition: fill-opacity .35s ease, stroke-opacity .35s ease, filter .35s ease;
 }
-
 g.card.active rect {
     fill-opacity: 0.85;
-    /* korostus */
-    stroke-opacity: 0.55;
+    /* emphasis without a harsh outline */
+    stroke-opacity: 0.42;
+    /* slightly stronger than passive, still subtle */
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
 }
 
@@ -270,10 +272,6 @@ body {
     stroke: none !important;
 }
 
-.zoomBar .hit {
-    fill: transparent !important;
-    opacity: 0 !important;
-}
 /* v36: globaali haalennuskerros */
 .global-dim-rect {
     fill: #bcbbbb;
@@ -290,10 +288,63 @@ body {
     filter: brightness(0.55);
     /* tasainen tumma, ei riipu zoomista */
 }
+/* v41: smoother GPU-friendly transition for all card groups */
+.card-group {
+    will-change: filter;
+    transition: filter 160ms ease;
+}
+
+/* v41: stronger fog tier for background cards */
+.card-group.background {
+    opacity: 1 !important;
+    /* do not stack opacity */
+    filter: brightness(0.62) saturate(0.90);
+}
+
+/* v41: keep active crisp; rely on filter, not opacity */
+.card-group.active {
+    filter: none;
+    /* crisp, no dimming */
+    isolation: isolate;
+    /* keep on top in stacking contexts */
+}
 
 .card-group.inactive .card {
     fill-opacity: 1;
     /* vältetään fill-opacity * filter -kertaantuminen */
+}
+/* v40: Dim only inactive cards; no global wash over empty background */
+g.card.inactive {
+    opacity: 1 !important;
+    /* don't compound with child opacities */
+    filter: brightness(0.55);
+}
+
+g.card.inactive rect {
+    fill-opacity: 1;
+    /* prevent double-dimming with fill-opacity */
+}
+
+
+/* v41: even softer edge for background tier */
+.card-group.background g.card rect {
+    stroke-opacity: 0.12;
+    /* EN: strongest fade */
+    stroke-width: 0.5px;
+    filter: none;
+}
+/* v41: fade the border on INACTIVE cards (your CSS uses 'inactive') */
+.card-group.inactive g.card rect,
+g.card.inactive rect {
+    /* EN: match container hue and make it extremely subtle so brightness() won't pop it */
+    stroke: #474646;
+    /* same as #timeline-container background */
+    stroke-opacity: 0.08;
+    /* very low visibility */
+    stroke-width: 0.5px;
+    /* thinner non-scaling edge */
+    filter: none;
+    /* remove local halo on inactive */
 }
 
 /* v38: estä iOS/Android copy/select/callout aikajanan alueella */
@@ -322,14 +373,53 @@ svg .zoomBar .window,
 svg .zoomBar .hit {
     pointer-events: none;
 }
-/* v40: Dim only inactive cards; no global wash over empty background */
-g.card.inactive {
-    opacity: 1 !important;
-    /* don't compound with child opacities */
-    filter: brightness(0.55);
+/* v41: animation touch cursor (Chrome DevTools -tyylinen) */
+#touch-cursor {
+    position: fixed;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(252, 170, 63, 0.689);
+    box-shadow:
+        0 0 0 10px rgba(255, 255, 255, 0.10),
+        0 1px 6px rgba(0, 0, 0, .35);
+    z-index: 1700;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-9px, -9px);
+    /* keskitys pisteeseen */
+    transition:
+        opacity .50s ease,
+        left .60s cubic-bezier(.2, .8, .2, 1),
+        top .60s cubic-bezier(.2, .8, .2, 1);
 }
 
-g.card.inactive rect {
-    fill-opacity: 1;
-    /* prevent double-dimming with fill-opacity */
+.touch-ripple {
+    position: fixed;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+    z-index: 1699;
+    opacity: 0.85;
+    transform: translate(-14px, -14px) scale(0.6);
+    animation: ripple-pop .45s ease-out forwards;
+}
+
+@keyframes ripple-pop {
+    to {
+        opacity: 0;
+        transform: translate(-14px, -14px) scale(1.25);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    #touch-cursor,
+    .touch-ripple {
+        transition: none !important;
+        animation: none !important;
+    }
 }

@@ -373,3 +373,53 @@ svg .zoomBar .window,
 svg .zoomBar .hit {
     pointer-events: none;
 }
+/* v41: animation touch cursor (Chrome DevTools -tyylinen) */
+#touch-cursor {
+    position: fixed;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(252, 170, 63, 0.689);
+    box-shadow:
+        0 0 0 10px rgba(255, 255, 255, 0.10),
+        0 1px 6px rgba(0, 0, 0, .35);
+    z-index: 1700;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-9px, -9px);
+    /* keskitys pisteeseen */
+    transition:
+        opacity .50s ease,
+        left .60s cubic-bezier(.2, .8, .2, 1),
+        top .60s cubic-bezier(.2, .8, .2, 1);
+}
+
+.touch-ripple {
+    position: fixed;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+    z-index: 1699;
+    opacity: 0.85;
+    transform: translate(-14px, -14px) scale(0.6);
+    animation: ripple-pop .45s ease-out forwards;
+}
+
+@keyframes ripple-pop {
+    to {
+        opacity: 0;
+        transform: translate(-14px, -14px) scale(1.25);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    #touch-cursor,
+    .touch-ripple {
+        transition: none !important;
+        animation: none !important;
+    }
+}

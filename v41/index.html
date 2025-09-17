@@ -120,6 +120,167 @@
     </script>
 
     <script src="timeline.js"></script>
+    
+    <script>     // Startup animation: ---------------------------------------------
+        const nav = performance.getEntriesByType('navigation')[0];
+            if (nav && nav.type === 'reload') {
+                sessionStorage.removeItem('startup_v41_shown');
+            }
+
+        (function(){
+            function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // --- Touch cursor helpers (Chrome DevTools -tyylinen pallo) ---
+  function ensureTouchCursor(){
+            let el = document.getElementById('touch-cursor');
+        if(!el){
+            el = document.createElement('div');
+        el.id = 'touch-cursor';
+        // inline style backup (jos style.css puuttuu)
+        el.style.cssText = [
+        'position:fixed;width:18px;height:18px;border-radius:50%;',
+        'background:rgba(255,255,255,0.95);',
+        'box-shadow:0 0 0 10px rgba(255,255,255,0.10),0 1px 6px rgba(0,0,0,.35);',
+        'z-index:1700;pointer-events:none;opacity:0;',
+        'transform:translate(-9px,-9px);',
+        'transition:opacity .20s ease,left .60s cubic-bezier(.2,.8,.2,1),top .60s cubic-bezier(.2,.8,.2,1);'
+        ].join('');
+        document.body.appendChild(el);
+    }
+        return el;
+  }
+        function moveTouchCursor(el, x, y, visible=true){
+            el.style.left = x + 'px';
+        el.style.top  = y + 'px';
+        el.style.opacity = visible ? '1' : '0';
+  }
+        function tapRipple(x,y){
+    // kevyt "pulse" ilman riippuvuutta ulkoisesta CSS:stä
+    const r = document.createElement('div');
+        r.style.cssText = [
+        'position:fixed;width:28px;height:28px;border-radius:50%;',
+        'border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(255,255,255,0.45);',
+        'pointer-events:none;z-index:1699;opacity:0.85;',
+        'transform:translate(-14px,-14px) scale(0.6);transition:transform .35s ease, opacity .35s ease;'
+        ].join('');
+        r.style.left = x + 'px';
+        r.style.top  = y + 'px';
+        document.body.appendChild(r);
+    requestAnimationFrame(()=>{
+            r.style.transform = 'translate(-14px,-14px) scale(1.15)';
+        r.style.opacity = '0';
+    });
+    setTimeout(()=>{ if(r.parentNode) r.parentNode.removeChild(r); }, 400);
+  }
+        function hideTouchCursor(el){
+    if(!el) return;
+        el.style.opacity = '0';
+    setTimeout(()=>{ if(el.parentNode) el.parentNode.removeChild(el); }, 280);
+  }
+
+        // Etsi "ihmiskunta" otsikon ruutu-koordinaatti; fallback = TimelineAPI.getCenter()
+        function findThemeCenter(theme){
+    try{
+      const svg = document.getElementById('timeline');
+        if(!svg) return null;
+        const titles = svg.querySelectorAll('text.card-title');
+        for(const t of titles){
+        if((t.textContent || '').trim().toLowerCase() === String(theme).toLowerCase()){
+          const r = t.getBoundingClientRect();
+        return {x: Math.round(r.left + r.width*0.5), y: Math.round(r.top + r.height*0.5) };
+        }
+      }
+    } catch(_){ }
+        return null;
+  }
+
+        // --- Startup sequence ---
+        // Järjestys: tap "ihmiskunta" → 1s tauko → aloita 50px oikealta → zoom in +50% → out −20% → scroll up + down
+        async function runStartup(){
+        const api = window.TimelineAPI;
+        if (!api) return;
+
+        const cursor = ensureTouchCursor();
+
+        // 1) Tap-select "ihmiskunta"
+        const cTap = findThemeCenter('ihmiskunta') || api.getCenter();
+        moveTouchCursor(cursor, cTap.x, cTap.y, true);
+        await sleep(520);
+        tapRipple(cTap.x, cTap.y);
+        api.selectTheme('ihmiskunta');
+
+        // tauko 1 s (touch irti)
+        moveTouchCursor(cursor, cTap.x, cTap.y, false);
+        await sleep(1000);
+
+        // 2) Aloituskohta 50 px oikealle
+        const start = {x: cTap.x + 100, y: cTap.y };
+        moveTouchCursor(cursor, start.x, start.y, true);
+        await sleep(180);
+
+        // Zoom: +50% ja sitten −20%
+        const dx   = 120;
+        const kIn  = 1.5;  // +50%
+        const kOut = 0.8;  // −20% (rel.)
+
+        // zoom in — vedä oikealle ja ankkuroidu start-pisteeseen
+        moveTouchCursor(cursor, start.x + dx, start.y, true);
+        api.animScaleBy(kIn, start.x, start.y, 700);
+        await sleep(740);
+
+        // zoom out — vedä takaisin vasemmalle ja ankkuroi loppupisteeseen
+        moveTouchCursor(cursor, start.x, start.y, true);
+        api.animScaleBy(kOut, start.x + dx, start.y, 560);
+        await sleep(600);
+
+        // 3) Scroll: ylös ja alas samasta start-kohdasta
+        const dy = -90;
+        moveTouchCursor(cursor, start.x, start.y + dy, true);
+        api.animTranslateBy(0, dy, 620);
+        await sleep(660);
+
+        moveTouchCursor(cursor, start.x, start.y, true);
+        api.animTranslateBy(0, -dy, 520);
+        await sleep(540);
+
+        hideTouchCursor(cursor);
+  }
+
+  // Aja kerran / sessio (ohitus: ?demo=1)
+  document.addEventListener('timeline:ready', () => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        const url = new URL(location.href);
+        const force = url.searchParams.get('demo') === '1';
+        const SS_KEY = 'startup_v41_shown';
+
+        if (!force) {
+      if (sessionStorage.getItem(SS_KEY) === '1') return;
+        sessionStorage.setItem(SS_KEY, '1');
+    }
+        setTimeout(runStartup, 380);
+        const infoToggle = document.getElementById('info-toggle');
+      const infoBox = document.getElementById('info-box');
+
+      if (infoToggle && infoBox) {
+          infoToggle.addEventListener('click', async (e) => {
+              // Intercept only the first click on "?" so our sequence runs first.
+              e.preventDefault();
+              e.stopPropagation();
+
+              // Play the same startup animation regardless of session flag
+              await runStartup();
+
+              // Open the info box after animation
+              infoBox.hidden = false;
+              infoBox.style.display = 'block';
+          }, { capture: true, once: true });
+      }
+
+  });
+})();
+</script>
+
 </body>
 
 </html>
