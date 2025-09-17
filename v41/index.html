@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+        <title>History Timeline v41</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+
+<body>
+    <h1 id="page-title">
+        History at your fingertips — Big Bang to 2025
+        <span style="font-size:0.65em; color:#9e9d9d;">v41</span>
+    </h1>
+
+    <div id="info-toggle">?</div>
+<div id="info-box" style="display:none;">
+    <div id="help-message">
+        <p><em>Experimental visualization</em> of history across an immense time span.</p>
+        <p>A vertical, <em>zoomable logarithmic timeline</em> of key events from the Big Bang to the present
+            (2025).</p>
+        <p>Events are grouped into <em>partly overlapping themes</em> that you can bring to the front.</p>
+
+        <hr style="border:none; border-top:1px solid #ddd; margin:8px 0;">
+        <!-- pikavinkit -->
+        <p><em>Tips:</em> Pinch/scroll content or swipe L/R to zoom · Click a theme card to focus · Tap an event
+            for notes</p>
+    </div>
+
+    <!-- status päivittyy skriptistä -->
+    <div id="status-message" style="font-size:0.75em; color:#666; margin-top:2px;">
+        Loading…
+    </div>
+
+    <!-- erillinen author-kenttä, EI muutu skriptissä -->
+    <div id="author" style="font-size:0.75em; color:#666; margin-top:6px;">
+        Authors: Jukka Linjama &amp; ChatGPT 5.0. 
+    </div>
+
+    <div id="license-info" style="font-size:0.7em; color:#666; margin-top:6px;">
+        Project in <a href="https://github.com/JukkaTLinjama/log-aikajana" target="_blank">Github</a>
+        Shared as an <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC BY 4.0</a>
+        experiment.<br>
+        Enjoy &amp; share!
+    </div>
+</div>
+
+    <div id="timeline-container">
+        <svg id="timeline"></svg>
+    </div>
+
+    <div id="page-footer">© 2025 JL · CC BY 4.0</div>
+
+    <script>
+        // Debug switch via ?debug=1
+        (function () {
+            const u = new URL(location.href);
+            const dbg = u.searchParams.get("debug") === "1";
+            // näkyvä pieni virhepalkki vain debug-tilassa
+            if (dbg) {
+                const bar = document.createElement("div");
+                bar.id = "debug-bar";
+                bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;font:12px/1.4 system-ui;padding:6px 10px;background:#300;color:#fdd;display:none";
+                bar.textContent = "Debug on. Errors will appear here.";
+                document.addEventListener("DOMContentLoaded", () => document.body.appendChild(bar));
+                window.__DBG__ = true;
+                window.addEventListener("error", (e) => {
+                    bar.style.display = "block";
+                    bar.textContent = "Error: " + (e.message || "unknown");
+                    console.error("[timeline:error]", e.message, e.error);
+                });
+                window.addEventListener("unhandledrejection", (e) => {
+                    bar.style.display = "block";
+                    bar.textContent = "Promise error: " + (e.reason && (e.reason.message || e.reason));
+                    console.error("[timeline:promise]", e.reason);
+                });
+                console.log("%c[debug] enabled", "color:#9f9");
+            }
+        })();
+    </script>
+
+    <!-- Lightweight helpers (no side effects). Loaded before timeline.js -->
+    <script>
+        (function () {
+            if (window.Util) return; // avoid double-load
+            const Util = {};
+
+            /** Try/catch wrapper for draw/layout functions. */
+            Util.safe = function safe(fn, label) {
+                try { return (typeof fn === "function") ? fn() : undefined; }
+                catch (err) {
+                    const msg = `[${label}] ${err && err.message ? err.message : err}`;
+                    console.error("[timeline:render]", label, err);
+                    const bar = document.getElementById("debug-bar");
+                    if (bar) { bar.style.display = "block"; bar.textContent = "Render error: " + msg; }
+                }
+            };
+
+            /** Debounce helper. */
+            Util.debounce = function debounce(fn, ms) {
+                let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+            };
+
+            /** Perf timer: logs only when debug (?debug=1) is on. */
+            Util.timed = function timed(label, fn) {
+                const t0 = performance.now();
+                const out = fn();
+                const t1 = performance.now();
+                if (window.__DBG__) console.log(`[perf] ${label}: ${(t1 - t0).toFixed(1)} ms`);
+                return out;
+            };
+
+            /** Clamp helper. */
+            Util.clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+            window.Util = Util;
+        })();
+    </script>
+
+    <script src="timeline.js"></script>
+</body>
+
+</html>
