@@ -423,3 +423,9 @@ svg .zoomBar .hit {
         animation: none !important;
     }
 }
+/* v41: lock native scrolling during gesture (zoom or pan) */
+#timeline.gesture-active,
+#timeline-container.gesture-active {
+    touch-action: none;
+    overscroll-behavior: contain;
+}

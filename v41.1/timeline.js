@@ -395,126 +395,87 @@ let __isRendering = false;
             __isRendering = false;
         }
     }
-    // v41: touch-swipe zoom + desktop "press+drag" zoom (mouse/trackpad)
-    // - Touch: yhden sormen vaakaliike -> zoom (ankkuroitu sormen kohtaan)
-    // - Desktop: vasen painike alas + vaakaliike -> zoom (ei vaikuta pan-vedon ilman painallusta)
+    // v41: simple mode-lock — zoom OR pan per gesture (no mixing)
     function setupGlobalSwipeZoom(svgSel, zoomBehavior) {
-        const DEADZONE = 2;          // px, ignore jitter
-        const SENS_TOUCH = 0.012;    // scale per px (touch)
-        const SENS_MOUSE = 0.006;    // scale per px (mouse/trackpad)
-        const DOMINANCE = 1.25;      // |dx| must dominate |dy| by this factor to activate on mouse
+        const DEAD = 3;              // px jitter ignore
+        const DOM = 1.5;             // horizontal must dominate vertical by this ratio to choose zoom
+        const SENS_TOUCH = -0.006;   // reversed mapping: right = out, left = in
+        const SENS_MOUSE = -0.003;   // desktop sensitivity
+        const STEP = 20;             // cap per-frame delta (px)
+        const CLAMP_MIN = 0.95, CLAMP_MAX = 1.05; // per-step zoom bounds
 
-        // --- Touch (real touch pointers only) ---
-        let touchActive = false;
-        let touchLastX = 0;
+        let active = false;
+        let mode = null;             // null | 'zoom' | 'pan'
+        let startX = 0, startY = 0, lastX = 0, lastY = 0;
 
-        function isTouch(e) { return e.pointerType === 'touch'; }
+        const isTouch = (e) => e.pointerType === 'touch';
+        const svgNode = svgSel.node();
+        const contEl = document.getElementById('timeline-container');
+        function setGestureActive(on) {
+            if (on) {
+                svgNode.classList.add('gesture-active');
+                if (contEl) contEl.classList.add('gesture-active');
+            } else {
+                svgNode.classList.remove('gesture-active');
+                if (contEl) contEl.classList.remove('gesture-active');
+            }
+        }
 
+        // Pointer down: estä D3-zoomin oma “start” → hoidamme itse lukituksen
         svgSel.node().addEventListener('pointerdown', (e) => {
             if (!e.isPrimary) return;
-
-            if (isTouch(e)) {
-                touchActive = true;
-                touchLastX = e.clientX;
-                try { e.target.setPointerCapture(e.pointerId); } catch { }
-            }
+            active = true;
+            mode = null;
+            startX = lastX = e.clientX;
+            startY = lastY = e.clientY;
+            try { e.target.setPointerCapture(e.pointerId); } catch { }
+            e.stopPropagation(); // D3 ei aloita panni-gestiä
         }, { passive: true, capture: true });
 
         svgSel.node().addEventListener('pointermove', (e) => {
-            if (!e.isPrimary) return;
+            if (!active || !e.isPrimary) return;
 
-            if (isTouch(e) && touchActive) {
-                const dx = e.clientX - touchLastX;
-                if (Math.abs(dx) >= DEADZONE) {
-                    touchLastX = e.clientX;
-                    const factor = 1 + (dx * SENS_TOUCH); // right = zoom in
+            const dxTot = e.clientX - startX;
+            const dyTot = e.clientY - startY;
+
+            // Päätä moodi kerran
+            if (mode === null && (Math.abs(dxTot) >= DEAD || Math.abs(dyTot) >= DEAD)) {
+                mode = (Math.abs(dxTot) > Math.abs(dyTot) * DOM) ? 'zoom' : 'pan';
+                if (mode !== null) setGestureActive(true);
+            }
+
+            if (mode === 'zoom') {
+                const dxStep = Math.max(-STEP, Math.min(STEP, e.clientX - lastX));
+                if (Math.abs(dxStep) >= DEAD) {
+                    lastX = e.clientX;
+                    const sens = isTouch(e) ? SENS_TOUCH : SENS_MOUSE;
+                    const factor = Math.max(CLAMP_MIN, Math.min(CLAMP_MAX, 1 + dxStep * sens));
                     svgSel.call(zoomBehavior.scaleBy, factor, [e.clientX, e.clientY]);
-                    // estä d3.zoom drag-pan kosketuksella
-                    e.stopPropagation();
                 }
-            }
-        }, { passive: true, capture: true });
-
-        function endTouch() { touchActive = false; }
-        svgSel.node().addEventListener('pointerup', endTouch, { passive: true, capture: true });
-        svgSel.node().addEventListener('pointercancel', endTouch, { passive: true, capture: true });
-        svgSel.node().addEventListener('lostpointercapture', endTouch, { passive: true, capture: true });
-
-        // --- Desktop (mouse/trackpad): press + horizontal drag -> zoom ---
-        let mousePending = false;  // waiting to decide (zoom vs pan)
-        let mouseActive = false;   // actively zooming
-        let mStartX = 0, mStartY = 0, mLastX = 0;
-
-        svgSel.node().addEventListener('pointerdown', (e) => {
-            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
-            // Only when left button is pressed
-            if ((e.buttons & 1) === 1) {
-                mousePending = true;
-                mouseActive = false;
-                mStartX = mLastX = e.clientX;
-                mStartY = e.clientY;
-                // älä vielä pysäytä tapahtumaa: annetaan d3.zoom:lle mahdollisuus pan-ohjaukseen,
-                // aktivoimme zoomin vasta kun vaakaliike selvästi dominoi.
-            }
-        }, { passive: true, capture: true });
-
-        svgSel.node().addEventListener('pointermove', (e) => {
-            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
-
-            // if button released mid-gesture, end
-            if ((e.buttons & 1) !== 1) {
-                mousePending = false;
-                mouseActive = false;
+                // Älä koskaan anna D3:n pannata zoom-moodissa
+                e.stopPropagation();
                 return;
             }
 
-            const dx = e.clientX - mLastX;
-            const totDX = e.clientX - mStartX;
-            const totDY = e.clientY - mStartY;
-
-            if (mousePending) {
-                // decide gesture: horizontal-dominant drag becomes zoom, else let pan happen
-                if (Math.abs(totDX) >= DEADZONE && Math.abs(totDX) > Math.abs(totDY) * DOMINANCE) {
-                    mousePending = false;
-                    mouseActive = true;
-                    try { e.target.setPointerCapture(e.pointerId); } catch { }
-                    // from now on, we claim the gesture and block d3.zoom’s drag-pan
-                    e.stopPropagation();
-                } else {
-                    // not decided as zoom; let d3 handle normally (pan)
-                    mLastX = e.clientX;
-                    return;
+            if (mode === 'pan') {
+                const dyStep = Math.max(-STEP, Math.min(STEP, e.clientY - lastY));
+                if (Math.abs(dyStep) >= DEAD) {
+                    lastY = e.clientY;
+                    svgSel.call(zoomBehavior.translateBy, 0, dyStep);
                 }
-            }
-
-            if (mouseActive) {
-                if (Math.abs(dx) >= DEADZONE) {
-                    mLastX = e.clientX;
-                    const factor = 1 + (dx * SENS_MOUSE); // right = zoom in
-                    svgSel.call(zoomBehavior.scaleBy, factor, [e.clientX, e.clientY]);
-                }
-                // prevent d3.zoom from panning during our zoom mode
+                // Pidetään D3 ulkona myös pan-moodissa → ei tuplapannia
                 e.stopPropagation();
+                return;
             }
+
+            // mode === null: odotetaan päätöstä eikä päästetä D3:a starttaamaan
+            e.stopPropagation();
         }, { passive: true, capture: true });
 
-        svgSel.node().addEventListener('pointerup', (e) => {
-            if (e.pointerType !== 'mouse' || !e.isPrimary) return;
-            mousePending = false;
-            mouseActive = false;
-        }, { passive: true, capture: true });
-
-        svgSel.node().addEventListener('pointercancel', (e) => {
-            if (e.pointerType !== 'mouse') return;
-            mousePending = false;
-            mouseActive = false;
-        }, { passive: true, capture: true });
-
-        svgSel.node().addEventListener('lostpointercapture', (e) => {
-            if (e.pointerType !== 'mouse') return;
-            mousePending = false;
-            mouseActive = false;
-        }, { passive: true, capture: true });
+        const end = () => { active = false; mode = null; setGestureActive(false); };
+        svgSel.node().addEventListener('pointerup', end, { passive: true, capture: true });
+        svgSel.node().addEventListener('pointercancel', end, { passive: true, capture: true });
+        svgSel.node().addEventListener('lostpointercapture', end, { passive: true, capture: true });
     }
 
     // --- zoom käyttäytyminen ---
