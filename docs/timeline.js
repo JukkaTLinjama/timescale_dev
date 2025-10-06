@@ -1,4 +1,4 @@
-// timeline.js — v41
+// timeline.js — v42.2
 // switching from v38 to EN as default language
 
 // Safe debug logger (no-op unless ?debug=1 used)
@@ -99,6 +99,14 @@ let __isRendering = false;
     // v36: varmista kerrosjärjestys heti luontivaiheessa
     setZOrder();
 
+    // v42: centerline + label (and a future-use invisible pad)
+    const centerZoomPad = svg.append("rect").attr("class", "centerZoomPad");
+    const centerZoomLine = svg.append("line").attr("class", "centerZoomLine");
+    const centerZoomText = svg.append("text")
+        .attr("class", "centerZoomLabel")
+        .text("zoom <->");
+
+
     // --- apufunktiot ---
     function setZOrder() {
         gZoomTrack.lower(); // alin: kapea zoombar-tausta
@@ -167,6 +175,117 @@ let __isRendering = false;
         setZOrder();  // v35: varmistetaan ettei track koskaan peitä tekstejä
         // alustava zoom-ikkuna = koko alue
         zoomWin.attr("x", 2).attr("width", cfg.zoomBar.width - 4).attr("y", 0).attr("height", innerH - 1); // synkassa taustan kanssa
+    }
+
+    // v42: layout for the center hairline, label, and (future) pad
+    function layoutCenterOverlay() {
+        const w = state.width;
+        const h = state.height;
+        const zoneH = Math.max(80, Math.min(h * 0.36, 160)); // 80–160 px using current svg height
+        const zoneY = (h - zoneH) / 2;
+        const midY = Math.round(h / 2);
+
+        // Invisible pad (kept non-interactive for now)
+        centerZoomPad
+            .attr("x", 0)
+            .attr("y", zoneY)
+            .attr("width", w)
+            .attr("height", zoneH);
+
+        // --- Compute dynamic left/right stops so the hairline does not overlap axis or zoom bar ---
+        const DEFAULT_LEFT_INSET = 14; // safe fallback gap from the very left
+        const DEFAULT_RIGHT_INSET = 14; // safe fallback gap from the very right
+        const AXIS_GAP = 1;            // extra space after axis
+        const ZOOMB_GAP = 55;            // extra space before zoom bar
+
+        // Measure axis right edge (prefer a concrete axis group)
+        let axisRight = NaN;
+        const axisSel = svg.select("g.axis");
+        if (!axisSel.empty()) {
+            try {
+                const ab = axisSel.node().getBBox();
+                axisRight = ab.x + ab.width; // right edge of axis group
+            } catch (_) { }
+        }
+
+        // Measure zoom bar left edge (prefer the .track rect; fallback to the group)
+        let zoomBarLeft = NaN;
+        let zoomBarTarget = svg.select("g.zoomBar .track");
+        if (zoomBarTarget.empty()) zoomBarTarget = svg.select("g.zoomBar");
+        if (!zoomBarTarget.empty()) {
+            try {
+                const zb = zoomBarTarget.node().getBBox();
+                zoomBarLeft = zb.x; // left edge of zoom bar/track
+            } catch (_) { }
+        }
+
+        // Build the desired endpoints with sensible fallbacks
+        let xLeft = isFinite(axisRight) ? Math.ceil(axisRight + AXIS_GAP) : DEFAULT_LEFT_INSET;
+        let xRight = isFinite(zoomBarLeft) ? Math.floor(zoomBarLeft - ZOOMB_GAP) : (w - DEFAULT_RIGHT_INSET);
+
+        // Clamp to the viewport
+        xLeft = Math.max(0, Math.min(xLeft, w - DEFAULT_RIGHT_INSET));
+        xRight = Math.max(DEFAULT_LEFT_INSET, Math.min(xRight, w));
+
+        // If the computed span is suspiciously short, revert to wide defaults
+        const span = xRight - xLeft;
+        if (span < w * 0.3) {
+            xLeft = DEFAULT_LEFT_INSET + (isFinite(axisRight) ? Math.min(axisRight + AXIS_GAP, 40) : 0);
+            xRight = w - DEFAULT_RIGHT_INSET - (isFinite(zoomBarLeft) ? Math.min((w - zoomBarLeft) + ZOOMB_GAP, 40) : 0);
+        }
+        // Still too short? Ensure a minimal centered segment as a final safety.
+        if ((xRight - xLeft) < 24) {
+            const cx = Math.round(w / 2);
+            xLeft = cx - 12;
+            xRight = cx + 12;
+        }
+
+        // Hairline (dashed accent is styled in CSS)
+        centerZoomLine
+            .attr("x1", xLeft)
+            .attr("x2", xRight)
+            .attr("y1", midY)
+            .attr("y2", midY);
+
+        // Label centered between the computed endpoints
+        centerZoomText
+            .attr("x", Math.round((xLeft + xRight) / 1.4))  // slghtly to right side
+            .attr("y", midY - 8); // a few pixels above the line
+    }
+
+    // v42: continuous prefocus for the nearest-to-center EVENT label
+    let prefocusRaf = null;
+
+    /** Compute and mark the <text.event-label> whose visual center is nearest to mid Y. */
+    function updatePrefocusNow() {
+        const cy = state.height / 2;
+        let bestNode = null;
+        let bestDist = Infinity;
+
+        d3.selectAll("text.event-label").each(function () {
+            try {
+                const b = this.getBBox();           // current SVG-space bbox (includes transforms)
+                const yCenter = b.y + b.height / 2;
+                const dist = Math.abs(yCenter - cy);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestNode = this;
+                }
+            } catch (_) { /* element might not be measurable yet; ignore */ }
+        });
+
+        // Clear previous focus and apply the new one
+        d3.selectAll("text.event-label.prefocus").classed("prefocus", false);
+        if (bestNode) d3.select(bestNode).classed("prefocus", true);
+    }
+
+    /** Throttled request: ensure at most one prefocus update per frame. */
+    function requestPrefocusUpdate() {
+        if (prefocusRaf != null) return;
+        prefocusRaf = requestAnimationFrame(() => {
+            prefocusRaf = null;
+            updatePrefocusNow();
+        });
     }
 
     function innerWidth() { return Math.max(0, state.width - cfg.margin.left - cfg.margin.right); }
@@ -394,7 +513,9 @@ let __isRendering = false;
         } finally {
             __isRendering = false;
         }
+        requestPrefocusUpdate();
     }
+
     // v41: simple mode-lock — zoom OR pan per gesture (no mixing)
     function setupGlobalSwipeZoom(svgSel, zoomBehavior) {
         const DEAD = 3;              // px jitter ignore
@@ -407,6 +528,15 @@ let __isRendering = false;
         let active = false;
         let mode = null;             // null | 'zoom' | 'pan'
         let startX = 0, startY = 0, lastX = 0, lastY = 0;
+
+        // --- v42: vaakazoom sallitaan vain keskialueelta ---
+        function inCenterZone(y) {
+            const H = innerHeight();                 // käytä nykyistä sisäkorkeutta
+            const zoneH = Math.max(80, Math.min(H * 0.36, 160)); // 80–160 px (~36% H)
+            const y0 = (H - zoneH) / 2, y1 = y0 + zoneH;
+            return y >= y0 && y <= y1;
+        }
+        let startInCenter = false;
 
         const isTouch = (e) => e.pointerType === 'touch';
         const svgNode = svgSel.node();
@@ -428,8 +558,12 @@ let __isRendering = false;
             mode = null;
             startX = lastX = e.clientX;
             startY = lastY = e.clientY;
+
+            // v42: lukitse tieto siitä, alkoiko ele keskialueelta
+            startInCenter = inCenterZone(e.clientY);
+
             try { e.target.setPointerCapture(e.pointerId); } catch { }
-            e.stopPropagation(); // D3 ei aloita panni-gestiä
+            e.stopPropagation();
         }, { passive: true, capture: true });
 
         svgSel.node().addEventListener('pointermove', (e) => {
@@ -438,10 +572,16 @@ let __isRendering = false;
             const dxTot = e.clientX - startX;
             const dyTot = e.clientY - startY;
 
-            // Päätä moodi kerran
             if (mode === null && (Math.abs(dxTot) >= DEAD || Math.abs(dyTot) >= DEAD)) {
-                mode = (Math.abs(dxTot) > Math.abs(dyTot) * DOM) ? 'zoom' : 'pan';
-                if (mode !== null) setGestureActive(true);
+                const horizDominates = (Math.abs(dxTot) > Math.abs(dyTot) * DOM);
+
+                // v42: jos hor. dominoi mutta aloitus EI ollut keskialueella → pakota pan
+                if (horizDominates && startInCenter) {
+                    mode = 'zoom';
+                } else {
+                    mode = 'pan';
+                }
+                setGestureActive(true);
             }
 
             if (mode === 'zoom') {
@@ -479,22 +619,46 @@ let __isRendering = false;
     }
 
     // --- zoom käyttäytyminen ---
+    const ZOOM_MIN = 0.85;   // do not allow extreme zoom-out
+    const ZOOM_MAX = 6;      // sensible zoom-in cap
+
     const zoomBehavior = d3.zoom()
-        .scaleExtent([0.3, 12])
-        .translateExtent([[0, 0], [1, 1]]) // päivitetään initissä
+        .scaleExtent([ZOOM_MIN, ZOOM_MAX])
+        .extent([[0, 0], [state.width, state.height]])  // viewport anchor
+
         .on("zoom", (event) => {
-            // rescale → clamp domain alkuperäiseen
+            // 1) rescale Y (no domain clamp)
             const t = event.transform;
-            const tmp = t.rescaleY(state.yBase);
-            const [a, b] = tmp.domain();
-            const clamped = [
-                Math.max(a, state.minYears),
-                Math.min(b, state.maxYears)
-            ];
-            state.y = d3.scaleLog().domain(clamped).range(state.yBase.range());
+            state.y = t.rescaleY(state.yBase);
+
+            // 2) dynamic overscroll: big at k≈1, shrinks as you zoom in
+            //    base = 50% of viewport; actual = base / k  (min 16 px)
+            {
+                const base = Math.round(state.height * 0.5);
+                const extra = Math.max(16, Math.round(base / Math.max(1e-6, t.k)));
+
+                let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
+                try {
+                    const bb = svg.select("#plot-rect").node().getBBox();
+                    x0 = bb.x;
+                    y0 = bb.y - extra;
+                    x1 = bb.x + bb.width;
+                    y1 = bb.y + bb.height + extra;
+                } catch (_) {
+                    y0 = -extra;
+                    y1 = state.height + extra;
+                }
+
+                // update extent on every zoom so pan bounds match the current scale
+                zoomBehavior
+                    .extent([[0, 0], [state.width, state.height]])
+                    .translateExtent([[x0, y0], [x1, y1]]);
+            }
+
+            // 3) redraw
             updateZoomIndicator(t);
             applyZoom();
-        });
+        })
 
     // --- data ---
     async function loadData() {
@@ -545,6 +709,8 @@ let __isRendering = false;
         document.documentElement.style.setProperty('--header-h', `${h1H}px`);
 
         layout();
+        layoutCenterOverlay();   // v42: place hairline + label
+
         // v33: info-paneelin toggle (tukee sekä #info-box että #help)
         const infoToggle = document.getElementById('info-toggle') || document.getElementById('helpBtn');
         const infoBox = document.getElementById('info-box') || document.getElementById('help');
@@ -583,9 +749,30 @@ let __isRendering = false;
 
         // zoom extents
         svg.call(zoomBehavior);
+        // v42.4: allow vertical overscroll (works at k=1 and zoomed in)
+        {
+            const extra = Math.round(state.height * 0.5);   // 50 % overscroll
+            let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
+
+            try {
+                const bb = svg.select("#plot-rect").node().getBBox();
+                x0 = bb.x;
+                y0 = bb.y - extra;
+                x1 = bb.x + bb.width;
+                y1 = bb.y + bb.height + extra;
+            } catch (_) {
+                // fallback if bbox not yet valid
+                y0 = -extra;
+                y1 = state.height + extra;
+            }
+
+            zoomBehavior
+                .extent([[0, 0], [state.width, state.height]])
+                .translateExtent([[x0, y0], [x1, y1]]);
+        }
+
         setupGlobalSwipeZoom(svg, zoomBehavior); // v41: one-finger horizontal swipe -> zoom
         svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
-        zoomBehavior.translateExtent([[0, -2000], [innerWidth(), innerHeight() + 2000]]); // v38: reilu pystybufferi
 
         // lataa & piirrä
         await loadData();
@@ -656,23 +843,43 @@ let __isRendering = false;
             // 2) säilytä nykyinen zoom, päivitä layout ja extentit (laaja extent)
             const tBefore = d3.zoomTransform(svg.node());
             layout();
+            layoutCenterOverlay();   // v42: place hairline + label
+            {
+                const extra = Math.round(state.height * 0.5);
+                let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
+
+                try {
+                    const bb = svg.select("#plot-rect").node().getBBox();
+                    x0 = bb.x;
+                    y0 = bb.y - extra;
+                    x1 = bb.x + bb.width;
+                    y1 = bb.y + bb.height + extra;
+                } catch (_) {
+                    y0 = -extra;
+                    y1 = state.height + extra;
+                }
+
+                zoomBehavior
+                    .extent([[0, 0], [state.width, state.height]])
+                    .translateExtent([[x0, y0], [x1, y1]]);
+            }
+
             svg.call(zoomBehavior);
             svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
             // v40: clamp panning/zooming to the visible content box (no overscroll).
-            const H = innerHeight();
-            zoomBehavior.extent([[0, 0], [state.width, H]])
-                .translateExtent([[0, 0], [state.width, H]]);
 
             // käytä ajantasaista transformia indikaattoriin & piirtoon
             const tNow = d3.zoomTransform(svg.node());
             updateZoomIndicator(tNow);
             applyZoom();
+            requestPrefocusUpdate();
 
             // 3) palauta sama zoom-tila VAIN jos ei käynnissä autofocus-animaatio
             if (!autoZooming) {
                 svg.call(zoomBehavior.transform, tBefore);
             }
             setZOrder();
+            requestPrefocusUpdate();
         });
         ro.observe(container);
     }

@@ -1,4 +1,4 @@
-/* v41 CSS for History Timeline */
+/* v42 CSS for History Timeline */
 :root {
     --bg: #0b0b0c;
     --fg: #e6e6e6;
@@ -325,7 +325,6 @@ g.card.inactive rect {
     /* prevent double-dimming with fill-opacity */
 }
 
-
 /* v41: even softer edge for background tier */
 .card-group.background g.card rect {
     stroke-opacity: 0.12;
@@ -373,6 +372,7 @@ svg .zoomBar .window,
 svg .zoomBar .hit {
     pointer-events: none;
 }
+
 /* v41: animation touch cursor (Chrome DevTools -tyylinen) */
 #touch-cursor {
     position: fixed;
@@ -423,9 +423,73 @@ svg .zoomBar .hit {
         animation: none !important;
     }
 }
+
+/* v42 fix: ensure all SVG children under #timeline allow only vertical pan,
+   so horizontal gestures are free for our custom zoom logic even on cards */
+#timeline,
+#timeline * {
+    touch-action: pan-y;
+}
 /* v41: lock native scrolling during gesture (zoom or pan) */
 #timeline.gesture-active,
 #timeline-container.gesture-active {
     touch-action: none;
     overscroll-behavior: contain;
+}
+
+/* v42: center zoom indicator visuals (accent-colored, dashed) */
+.centerZoomLine {
+    stroke: var(--accent);
+    /* use theme accent (e.g., #ff8c42) */
+    stroke-opacity: 0.85;
+    /* light, not too strong */
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    /* dashed hairline */
+    stroke-linecap: butt;
+    /* crisp dashes */
+    shape-rendering: crispEdges;
+    pointer-events: none;
+    /* purely visual */
+}
+
+.centerZoomLabel {
+    fill: var(--accent);
+    /* match the line color */
+    fill-opacity: 0.9;
+    font-size: 11px;
+    font-family: sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    /* purely visual */
+    /* subtle readability halo without heavy shadow */
+    paint-order: stroke;
+    /* paint outline underneath */
+    stroke: rgba(0, 0, 0, 0.35);
+    /* soft outline for contrast */
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
+}
+
+/* optional future-use: the pad is invisible and does NOT catch input yet */
+.centerZoomPad {
+    fill: transparent;
+    pointer-events: none;
+    /* keep off for now */
+    /* If/when you want the pad to handle zoom-only input, switch to:
+     pointer-events: all; touch-action: none; */
+}
+/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) */
+text.event-label.prefocus {
+    font-size: 12px;
+    /* slightly larger than default */
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    transition: font-size .15s ease, letter-spacing .15s ease;
+    /* thin readability outline */
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.35);
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
 }
