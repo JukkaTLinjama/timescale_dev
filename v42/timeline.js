@@ -181,7 +181,7 @@ let __isRendering = false;
     function layoutCenterOverlay() {
         const w = state.width;
         const h = state.height;
-        const zoneH = Math.max(80, Math.min(innerHeight() * 0.36, 160)); // 80–160 px feels good
+        const zoneH = Math.max(80, Math.min(h * 0.36, 160)); // 80–160 px using current svg height
         const zoneY = (h - zoneH) / 2;
         const midY = Math.round(h / 2);
 
@@ -192,17 +192,99 @@ let __isRendering = false;
             .attr("width", w)
             .attr("height", zoneH);
 
-        // Hairline across the center
+        // --- Compute dynamic left/right stops so the hairline does not overlap axis or zoom bar ---
+        const DEFAULT_LEFT_INSET = 14; // safe fallback gap from the very left
+        const DEFAULT_RIGHT_INSET = 14; // safe fallback gap from the very right
+        const AXIS_GAP = 1;            // extra space after axis
+        const ZOOMB_GAP = 55;            // extra space before zoom bar
+
+        // Measure axis right edge (prefer a concrete axis group)
+        let axisRight = NaN;
+        const axisSel = svg.select("g.axis");
+        if (!axisSel.empty()) {
+            try {
+                const ab = axisSel.node().getBBox();
+                axisRight = ab.x + ab.width; // right edge of axis group
+            } catch (_) { }
+        }
+
+        // Measure zoom bar left edge (prefer the .track rect; fallback to the group)
+        let zoomBarLeft = NaN;
+        let zoomBarTarget = svg.select("g.zoomBar .track");
+        if (zoomBarTarget.empty()) zoomBarTarget = svg.select("g.zoomBar");
+        if (!zoomBarTarget.empty()) {
+            try {
+                const zb = zoomBarTarget.node().getBBox();
+                zoomBarLeft = zb.x; // left edge of zoom bar/track
+            } catch (_) { }
+        }
+
+        // Build the desired endpoints with sensible fallbacks
+        let xLeft = isFinite(axisRight) ? Math.ceil(axisRight + AXIS_GAP) : DEFAULT_LEFT_INSET;
+        let xRight = isFinite(zoomBarLeft) ? Math.floor(zoomBarLeft - ZOOMB_GAP) : (w - DEFAULT_RIGHT_INSET);
+
+        // Clamp to the viewport
+        xLeft = Math.max(0, Math.min(xLeft, w - DEFAULT_RIGHT_INSET));
+        xRight = Math.max(DEFAULT_LEFT_INSET, Math.min(xRight, w));
+
+        // If the computed span is suspiciously short, revert to wide defaults
+        const span = xRight - xLeft;
+        if (span < w * 0.3) {
+            xLeft = DEFAULT_LEFT_INSET + (isFinite(axisRight) ? Math.min(axisRight + AXIS_GAP, 40) : 0);
+            xRight = w - DEFAULT_RIGHT_INSET - (isFinite(zoomBarLeft) ? Math.min((w - zoomBarLeft) + ZOOMB_GAP, 40) : 0);
+        }
+        // Still too short? Ensure a minimal centered segment as a final safety.
+        if ((xRight - xLeft) < 24) {
+            const cx = Math.round(w / 2);
+            xLeft = cx - 12;
+            xRight = cx + 12;
+        }
+
+        // Hairline (dashed accent is styled in CSS)
         centerZoomLine
-            .attr("x1", 0)
-            .attr("x2", w)
+            .attr("x1", xLeft)
+            .attr("x2", xRight)
             .attr("y1", midY)
             .attr("y2", midY);
 
-        // Label on (or slightly above) the hairline
+        // Label centered between the computed endpoints
         centerZoomText
-            .attr("x", Math.round(w / 2))
+            .attr("x", Math.round((xLeft + xRight) / 1.4))  // slghtly to right side
             .attr("y", midY - 8); // a few pixels above the line
+    }
+    // v42: continuous prefocus for the nearest-to-center EVENT label
+    let prefocusRaf = null;
+
+    /** Compute and mark the <text.event-label> whose visual center is nearest to mid Y. */
+    function updatePrefocusNow() {
+        const cy = state.height / 2;
+        let bestNode = null;
+        let bestDist = Infinity;
+
+        d3.selectAll("text.event-label").each(function () {
+            try {
+                const b = this.getBBox();           // current SVG-space bbox (includes transforms)
+                const yCenter = b.y + b.height / 2;
+                const dist = Math.abs(yCenter - cy);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestNode = this;
+                }
+            } catch (_) { /* element might not be measurable yet; ignore */ }
+        });
+
+        // Clear previous focus and apply the new one
+        d3.selectAll("text.event-label.prefocus").classed("prefocus", false);
+        if (bestNode) d3.select(bestNode).classed("prefocus", true);
+    }
+
+    /** Throttled request: ensure at most one prefocus update per frame. */
+    function requestPrefocusUpdate() {
+        if (prefocusRaf != null) return;
+        prefocusRaf = requestAnimationFrame(() => {
+            prefocusRaf = null;
+            updatePrefocusNow();
+        });
     }
 
     function innerWidth() { return Math.max(0, state.width - cfg.margin.left - cfg.margin.right); }
@@ -430,7 +512,9 @@ let __isRendering = false;
         } finally {
             __isRendering = false;
         }
+        requestPrefocusUpdate();
     }
+
     // v41: simple mode-lock — zoom OR pan per gesture (no mixing)
     function setupGlobalSwipeZoom(svgSel, zoomBehavior) {
         const DEAD = 3;              // px jitter ignore
@@ -725,12 +809,14 @@ let __isRendering = false;
             const tNow = d3.zoomTransform(svg.node());
             updateZoomIndicator(tNow);
             applyZoom();
+            requestPrefocusUpdate();
 
             // 3) palauta sama zoom-tila VAIN jos ei käynnissä autofocus-animaatio
             if (!autoZooming) {
                 svg.call(zoomBehavior.transform, tBefore);
             }
             setZOrder();
+            requestPrefocusUpdate();
         });
         ro.observe(container);
     }

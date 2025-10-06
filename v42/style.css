@@ -444,7 +444,7 @@ svg .zoomBar .hit {
     stroke-opacity: 0.85;
     /* light, not too strong */
     stroke-width: 1;
-    stroke-dasharray: 4 4;
+    stroke-dasharray: 2 4;
     /* dashed hairline */
     stroke-linecap: butt;
     /* crisp dashes */
@@ -479,4 +479,17 @@ svg .zoomBar .hit {
     /* keep off for now */
     /* If/when you want the pad to handle zoom-only input, switch to:
      pointer-events: all; touch-action: none; */
+}
+/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) */
+text.event-label.prefocus {
+    font-size: 12px;
+    /* slightly larger than default */
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    transition: font-size .15s ease, letter-spacing .15s ease;
+    /* thin readability outline */
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.35);
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
 }
