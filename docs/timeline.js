@@ -106,6 +106,105 @@ let __isRendering = false;
         .attr("class", "centerZoomLabel")
         .text("zoom <->");
 
+    // v42.3 (click-only): Basic config for the info popover
+    const infoCfg = {
+        margin: 10 // viewport clamping margin in px
+    };
+
+    // v42.3: Singleton popover element management
+    let infoEl = null;
+
+    /** Ensure the singleton info element exists. */
+    function ensureInfoEl() {
+        if (infoEl && infoEl.parentNode) return infoEl;
+        infoEl = document.createElement('div');
+        infoEl.id = 'event-info';
+        document.body.appendChild(infoEl);
+
+        // stop clicks from bubbling to document (which would close it)
+        infoEl.addEventListener('click', (e) => e.stopPropagation());
+        return infoEl;
+    }
+
+    /** Hide/dismiss the popover with an exit animation. */
+    function hideEventInfo() {
+        if (!infoEl) return;
+        // Remove the visible class; CSS handles fade-out.
+        infoEl.classList.remove('is-visible');
+    }
+
+    // v42.3: hide info popup when any gesture or viewport motion starts
+    function onViewportMotion() {
+        hideEventInfo();
+    }
+
+    // Close on background click or ESC
+    document.addEventListener('click', hideEventInfo);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideEventInfo(); });
+
+    /** Build HTML content for a given event object. */
+    function buildEventHTML(ev) {
+        const label = ev?.label || 'Event';
+        const year = (ev?.year ?? '').toString();
+        const comments = (ev?.comments || '').trim();
+        const ref = (ev?.ref || '').trim();
+
+        const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
+        const body = comments ? `<div class="body">${comments}</div>` : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+        const link = ref && /^https?:\/\//i.test(ref)
+            ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
+            : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
+
+        return `
+    <div class="title">${label}</div>
+    <div class="meta">${meta}</div>
+    ${body}
+    ${link}
+    <div class="hint">Tip: click outside to close.</div>
+  `;
+    }
+    /**
+     * Show the popover near the event's label and animate it in.
+     * Uses class-based visibility so CSS transitions can run.
+     */
+    function showEventInfo(ev, screenBox) {
+        const el = ensureInfoEl();
+        el.innerHTML = buildEventHTML(ev);
+
+        // Make it "measurable" while still hidden (no flicker):
+        // Ensure visible styles are not yet applied to allow positioning first.
+        el.classList.remove('is-visible');
+
+        // Position based on content size
+        // Temporarily force visibility for accurate measurement without opacity jump
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px) scale(0.98)';
+
+        // Next frame: measure and place
+        requestAnimationFrame(() => {
+            const rect = el.getBoundingClientRect(); // current size is fine even hidden
+            const M = infoCfg.margin;
+
+            let x = Math.round(screenBox.left + 12);
+            let y = Math.round(screenBox.top - rect.height - 8);
+
+            if (y < M) y = Math.round(screenBox.bottom + 8);
+            if (x + rect.width + M > window.innerWidth) x = Math.max(M, window.innerWidth - rect.width - M);
+            if (y + rect.height + M > window.innerHeight) y = Math.max(M, window.innerHeight - rect.height - M);
+
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+
+            // Next frame: reveal with animation
+            requestAnimationFrame(() => {
+                el.style.visibility = '';  // back to stylesheet control
+                el.style.opacity = '';
+                el.style.transform = '';
+                el.classList.add('is-visible');
+            });
+        });
+    }
 
     // --- apufunktiot ---
     function setZOrder() {
@@ -451,6 +550,29 @@ let __isRendering = false;
                     .attr("x", 12).attr("y", yy)
                     .text(`${e.label} (${(e.year ?? "").toString()})`);
             });
+            // v42.3 (click-only): open info when clicking an event group or its label
+            evSel.merge(evEnt)
+                .on('click', function (d3evt, evData) {
+                    // Prevent card activation handlers and background close from firing
+                    d3evt.preventDefault();
+                    d3evt.stopPropagation();
+
+                    try {
+                        // Prefer anchoring to the label if present, else to the group bbox
+                        const labelNode = d3.select(this).select('text.event-label').node();
+                        const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
+                        showEventInfo(evData, box); // <- uses your existing helper
+                    } catch (_) {
+                        // Fallback: place near screen center if bbox fails
+                        const fake = {
+                            left: window.innerWidth / 2 - 40,
+                            top: window.innerHeight / 2 - 20,
+                            right: window.innerWidth / 2 + 40,
+                            bottom: window.innerHeight / 2 + 20
+                        };
+                        showEventInfo(evData, fake);
+                    }
+                });
             // v40: ensure correct z-order right after toggling activation.
             // dim overlay (gDim) must sit above passive cards (gRoot) but below active ones (gActive).
             setZOrder();
@@ -656,6 +778,7 @@ let __isRendering = false;
             }
 
             // 3) redraw
+            onViewportMotion(); // close info when user zooms
             updateZoomIndicator(t);
             applyZoom();
         })
