@@ -1,9 +1,61 @@
 {
   "metadata": {
-    "version": "1.6",
-    "author": "ChatGPT (muunnettu nykyhetkestä)",
-    "updated": "20250804"
+    "version": "1.7",
+    "author": "Jukka Linjama & ChatGPT",
+    "updated": "2025-10-08",
+    "locale_default": "fi",
+    "locales": [
+      "fi",
+      "en"
+    ],
+    "time_spec": {
+      "units": "years_from_present",
+      "log_base": 10,
+      "now_iso": "2025-10-08T00:00:00+03:00"
+    },
+    "realtime": {
+      "enable_clock": true,
+      "scales": [
+        "second",
+        "minute",
+        "hour",
+        "day",
+        "week",
+        "month",
+        "year"
+      ]
+    },
+    "ui": {
+      "themeOrder": [
+        "kosmos",
+        "biologia",
+        "ihmiskunta",
+        "historia",
+        "moderni teknologia"
+      ],
+      "themeColors": {
+        "kosmos": "#6372b2",
+        "biologia": "#70a8c6",
+        "ihmiskunta": "#4b9fa8",
+        "historia": "#368d60",
+        "moderni teknologia": "#5a9646"
+      }
+    },
+    "schema": {
+      "event_optional": [
+        "id",
+        "tags",
+        "importance",
+        "certainty",
+        "t_span",
+        "i18n",
+        "source",
+        "display",
+        "relative_time"
+      ]
+    }
   },
+
   "events": [
     {
       "theme": "kosmos",
@@ -13,8 +65,38 @@
           "year": "13.8 mrd v",
           "time_years": 13800000000,
           "log": 17.64,
-          "author": "",
-          "ref": "",
+          "id": "big-bang",
+          "tags": [
+            "cosmology",
+            "origin"
+          ],
+          "importance": 5,
+          "certainty": 0.95,
+          "t_span": {
+            "start_years": 13810000000,
+            "end_years": 13770000000
+          },
+          "i18n": {
+            "fi": {
+              "label": "Alkuräjähdys",
+              "comments": "Alkuhetki nykyisen kosmologian mukaan."
+            },
+            "en": {
+              "label": "Big Bang",
+              "comments": "The beginning in standard cosmology."
+            }
+          },
+          "source": [
+            {
+              "title": "Planck 2018 results",
+              "url": "https://example.org/planck2018"
+            }
+          ],
+          "display": {
+            "align": "auto",
+            "pin": false,
+            "hidden": false
+          },
           "comments": "test comment\ntoinen rivi"
         },
         {
@@ -450,6 +532,27 @@
           "author": "",
           "ref": "",
           "comments": ""
+        },
+        {
+          "label": "1 tunti sitten",
+          "year": "1 h",
+          "time_years": 0.0001,
+          "relative_time": {
+            "amount": 1,
+            "unit": "hour"
+          },
+          "i18n": {
+            "fi": {
+              "label": "1 tunti sitten"
+            },
+            "en": {
+              "label": "1 hout ago"
+            }
+          },
+          "display": {
+            "align": "auto"
+          },
+          "comments": "likiasrvo.. suhteessa nykyhetkeen"
         },
         {
           "label": "1 sekunti sitten",

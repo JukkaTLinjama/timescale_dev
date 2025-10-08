@@ -1,5 +1,5 @@
-// timeline.js — v42.2
-// switching from v38 to EN as default language
+// timeline.js — v43 2024-06-10
+// using new metadata format in evetnsDB.json with relative time to present
 
 // Safe debug logger (no-op unless ?debug=1 used)
 const DBG = !!window.__DBG__;
@@ -293,9 +293,9 @@ let __isRendering = false;
 
         // --- Compute dynamic left/right stops so the hairline does not overlap axis or zoom bar ---
         const DEFAULT_LEFT_INSET = 14; // safe fallback gap from the very left
-        const DEFAULT_RIGHT_INSET = 14; // safe fallback gap from the very right
+        const DEFAULT_RIGHT_INSET = 4; // safe fallback gap from the very right
         const AXIS_GAP = 1;            // extra space after axis
-        const ZOOMB_GAP = 55;            // extra space before zoom bar
+        const ZOOMB_GAP = 15;            // extra space before zoom bar
 
         // Measure axis right edge (prefer a concrete axis group)
         let axisRight = NaN;
@@ -348,7 +348,7 @@ let __isRendering = false;
 
         // Label centered between the computed endpoints
         centerZoomText
-            .attr("x", Math.round((xLeft + xRight) / 1.4))  // slghtly to right side
+            .attr("x", Math.round((xLeft + xRight) / 1.2))  // slghtly to right side
             .attr("y", midY - 8); // a few pixels above the line
     }
 
@@ -548,7 +548,7 @@ let __isRendering = false;
                     .attr("x1", -x + 4).attr("x2", 8).attr("y1", yy).attr("y2", yy).attr("stroke", "#aaa");
                 gg.select("text.event-label")
                     .attr("x", 12).attr("y", yy)
-                    .text(`${e.label} (${(e.year ?? "").toString()})`);
+                    .text(`${e.display_label || e.label} (${(e.year ?? "").toString()})`);
             });
             // v42.3 (click-only): open info when clicking an event group or its label
             evSel.merge(evEnt)
@@ -790,13 +790,40 @@ let __isRendering = false;
             if (!res.ok) throw new Error("eventsDB.json not found");
             const data = await res.json();
 
-            // flatten: lisätään theme jokaiselle eventille
-            state.events = (data.events || []).flatMap(g => (g.events || []).map(e => ({ ...e, theme: g.theme })));
-            state.themes = Array.from(new Set(state.events.map(e => e.theme)));
+            // --- metadata and UI themes (new v43) ---
+            const meta = data.metadata || {};
+            const ui = meta.ui || {};
+            const themeColors = ui.themeColors || null;
+            const themeOrder = Array.isArray(ui.themeOrder) ? ui.themeOrder : null;
+            const lang = meta.locale_default || "fi"; // default language for i18n labels
 
-            // värit per teema
-            state.themes.forEach(t => colorForTheme(t));
+            // --- Flatten event groups: add 'theme' to each event ---
+            state.events = (data.events || [])
+                .flatMap(g => (g.events || []).map(e => ({ ...e, theme: g.theme })));
 
+            // --- Add display_label (supports i18n labels) ---
+            state.events = state.events.map(e => ({
+                ...e,
+                display_label:
+                    (e.i18n && e.i18n[lang] && e.i18n[lang].label)
+                        ? e.i18n[lang].label
+                        : e.label
+            }));
+
+            // --- Derive theme list (use order from metadata if provided) ---
+            state.themes = themeOrder
+                ? themeOrder.filter(t => state.events.some(e => e.theme === t))
+                : Array.from(new Set(state.events.map(e => e.theme)));
+
+            // --- Assign colors (use metadata colors if defined) ---
+            // state.themes.forEach(t => {
+            //     if (themeColors && themeColors[t]) {
+            //         state.themeColors.set(t, themeColors[t]);
+            //     } else {
+            //         colorForTheme(t);
+            //     }
+            //});
+            
             computeDomainFromData();
             const sm = document.getElementById("status-message");
             if (sm) sm.textContent = "✅ Data loaded from eventsDB.json.";
