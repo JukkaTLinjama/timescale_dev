@@ -1,4 +1,4 @@
-/* v41 CSS for History Timeline */
+/* v42 CSS for History Timeline */
 :root {
     --bg: #0b0b0c;
     --fg: #e6e6e6;
@@ -325,7 +325,6 @@ g.card.inactive rect {
     /* prevent double-dimming with fill-opacity */
 }
 
-
 /* v41: even softer edge for background tier */
 .card-group.background g.card rect {
     stroke-opacity: 0.12;
@@ -373,6 +372,7 @@ svg .zoomBar .window,
 svg .zoomBar .hit {
     pointer-events: none;
 }
+
 /* v41: animation touch cursor (Chrome DevTools -tyylinen) */
 #touch-cursor {
     position: fixed;
@@ -423,9 +423,145 @@ svg .zoomBar .hit {
         animation: none !important;
     }
 }
+
+/* v42 fix: ensure all SVG children under #timeline allow only vertical pan,
+   so horizontal gestures are free for our custom zoom logic even on cards */
+#timeline,
+#timeline * {
+    touch-action: pan-y;
+}
 /* v41: lock native scrolling during gesture (zoom or pan) */
 #timeline.gesture-active,
 #timeline-container.gesture-active {
     touch-action: none;
     overscroll-behavior: contain;
+}
+
+/* v42: center zoom indicator visuals (accent-colored, dashed) */
+.centerZoomLine {
+    stroke: var(--accent);
+    /* use theme accent (e.g., #ff8c42) */
+    stroke-opacity: 0.85;
+    /* light, not too strong */
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    /* dashed hairline */
+    stroke-linecap: butt;
+    /* crisp dashes */
+    shape-rendering: crispEdges;
+    pointer-events: none;
+    /* purely visual */
+}
+
+.centerZoomLabel {
+    fill: var(--accent);
+    /* match the line color */
+    fill-opacity: 0.7;
+    font-size: 14px;
+    font-family: sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    /* purely visual */
+    /* subtle readability halo without heavy shadow */
+    paint-order: stroke;
+    /* paint outline underneath */
+    stroke: rgba(0, 0, 0, 0.35);
+    /* soft outline for contrast */
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
+}
+
+/* optional future-use: the pad is invisible and does NOT catch input yet */
+.centerZoomPad {
+    fill: transparent;
+    pointer-events: none;
+    /* keep off for now */
+    /* If/when you want the pad to handle zoom-only input, switch to:
+     pointer-events: all; touch-action: none; */
+}
+/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) */
+text.event-label.prefocus {
+    font-size: 12px;
+    /* slightly larger than default */
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    transition: font-size .15s ease, letter-spacing .15s ease;
+    /* thin readability outline */
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.35);
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
+}
+/* v42.3: Event "More info" popover (animated) */
+#event-info {
+    position: fixed;
+    z-index: 2200;
+    max-width: min(320px, 60vw);
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #eee;
+    background: rgba(28, 28, 30, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .45);
+
+    /* animation states (hidden by default) */
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+    pointer-events: none;
+    visibility: hidden;
+    transition: opacity 140ms ease-out, transform 160ms ease-out, visibility 0s linear 160ms;
+}
+
+/* visible state */
+#event-info.is-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+    visibility: visible;
+    transition: opacity 140ms ease-out, transform 160ms ease-out, visibility 0s;
+}
+
+#event-info .title {
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: #ffd399;
+}
+
+#event-info .meta {
+    font-size: 11px;
+    color: #c8c8c8;
+    opacity: .9;
+    margin-bottom: 6px;
+}
+
+#event-info .body {
+    white-space: pre-wrap;
+    color: #eaeaea;
+}
+
+#event-info .hint {
+    margin-top: 8px;
+    font-size: 10px;
+    color: #9aa0a6;
+}
+
+#event-info a {
+    color: #ffb703;
+    text-decoration-thickness: 1.5px;
+}
+
+#event-info a:visited {
+    color: #d1b67e;
+}
+
+/* Respect reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+
+    #event-info,
+    #event-info.is-visible {
+        transition: none;
+    }
 }
