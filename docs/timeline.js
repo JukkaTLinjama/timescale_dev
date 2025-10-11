@@ -1,4 +1,4 @@
-// timeline.js — v43 2024-06-10
+// timeline.js — v43.1 2024-06-11
 // using new metadata format in evetnsDB.json with relative time to present
 
 // Safe debug logger (no-op unless ?debug=1 used)
@@ -355,37 +355,52 @@ let __isRendering = false;
     // v42: continuous prefocus for the nearest-to-center EVENT label
     let prefocusRaf = null;
 
-    /** Compute and mark the <text.event-label> whose visual center is nearest to mid Y. */
-    function updatePrefocusNow() {
-        const cy = state.height / 2;
-        let bestNode = null;
-        let bestDist = Infinity;
-
-        d3.selectAll("text.event-label").each(function () {
-            try {
-                const b = this.getBBox();           // current SVG-space bbox (includes transforms)
-                const yCenter = b.y + b.height / 2;
-                const dist = Math.abs(yCenter - cy);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestNode = this;
-                }
-            } catch (_) { /* element might not be measurable yet; ignore */ }
-        });
-
-        // Clear previous focus and apply the new one
-        d3.selectAll("text.event-label.prefocus").classed("prefocus", false);
-        if (bestNode) d3.select(bestNode).classed("prefocus", true);
+    // --- v43.4: Data-driven prefocus (no DOM/BBox feedback) ---
+    function getFocusAnchorY() {
+        // Center hairline Y in gRoot's local coords (cards/text live here)
+        return (state.height / 2) - cfg.margin.top;
     }
 
-    /** Throttled request: ensure at most one prefocus update per frame. */
-    function requestPrefocusUpdate() {
-        if (prefocusRaf != null) return;
-        prefocusRaf = requestAnimationFrame(() => {
-            prefocusRaf = null;
-            updatePrefocusNow();
-        });
+    function computePrefocusData() {
+        // Pick the event whose data-y is closest to the focus anchor
+        if (!state.events || !state.events.length || !state.y) return;
+        const cy = getFocusAnchorY();
+
+        let best = null, bestDist = Infinity;
+        for (const e of state.events) {
+            const yy = state.y(e.time_years);
+            const d = Math.abs(yy - cy);
+            if (d < bestDist) { best = e; bestDist = d; }
+        }
+
+        state.__prefocusKey = best ? (best.label + best.time_years) : null;
+        state.__prefocusY = best ? state.y(best.time_years) : null;
     }
+
+    function markPrefocusClass() {
+        // Apply .prefocus to the freshly rendered label matching the cached key
+        const key = state.__prefocusKey;
+        d3.selectAll("text.event-label").classed("prefocus", false);
+        if (!key) return;
+        d3.selectAll("g.e")
+            .filter(d => (d && (d.label + d.time_years) === key))
+            .select("text.event-label")
+            .classed("prefocus", true);
+    }
+
+    // --- v43.3: vertical offset for neighbors of focused text ---
+    function computeTextFocusOffsetY(yEvt, yFoc) {
+        const R = 40;   // influence radius in px
+        const MAX = 8; // max |Δy| very near focus
+        const dy = yEvt - yFoc;
+        const ady = Math.abs(dy);
+        if (ady === 0 || ady >= R) return 0; // focused itself stays fixed
+        const t = 1 - ady / R;
+        const strength = Math.pow(t, 1.0);
+        const dir = Math.sign(dy); // above = -, below = +
+        return dir * MAX * strength;
+    }
+
 
     function innerWidth() { return Math.max(0, state.width - cfg.margin.left - cfg.margin.right); }
     function innerHeight() { return Math.max(0, state.height - cfg.margin.top - cfg.margin.bottom); }
@@ -538,18 +553,35 @@ let __isRendering = false;
             const evSel = g.select("g.events").selectAll("g.e").data(d.events, e => e.label + e.time_years);
             const evEnt = evSel.enter().append("g").attr("class", "e");
             evEnt.append("line").attr("class", "event-line");
-            evEnt.append("text").attr("class", "event-label").attr("x", 18).attr("dy", "0.32em");
+            evEnt.append("text")
+                .attr("class", "event-label")
+                .attr("x", 18)
+                .attr("dy", "0.32em")
+                .style("transform-box", "fill-box")
+                .style("transform-origin", "center");
             evSel.exit().remove();
 
             evSel.merge(evEnt).each(function (e) {
                 const yy = state.y(e.time_years);
                 const gg = d3.select(this);
+
+                // Keep lines at data Y (axis-aligned, no visual offset)
                 gg.select("line.event-line")
-                    .attr("x1", -x + 4).attr("x2", 8).attr("y1", yy).attr("y2", yy).attr("stroke", "#aaa");
+                    .attr("x1", -x + 4).attr("x2", 8)
+                    .attr("y1", yy).attr("y2", yy)
+                    .attr("stroke", "#aaa");
+
+                // v43.4: vertical halo around the data-driven prefocus
+                const yFoc = (state.__prefocusY != null) ? state.__prefocusY : getFocusAnchorY();
+                const textOffsetY = computeTextFocusOffsetY(yy, yFoc);
+
                 gg.select("text.event-label")
-                    .attr("x", 12).attr("y", yy)
+                    .attr("x", 12)
+                    .attr("y", yy) // keep data y fixed
+                    .style("transform", `translate(0px, ${textOffsetY}px)`)
                     .text(`${e.display_label || e.label} (${(e.year ?? "").toString()})`);
             });
+
             // v42.3 (click-only): open info when clicking an event group or its label
             evSel.merge(evEnt)
                 .on('click', function (d3evt, evData) {
@@ -614,28 +646,24 @@ let __isRendering = false;
     }
 
     function applyZoom() {
-        // Re-entrancy guard: if a render is already running, skip this call.
-        if (__isRendering) {
-            if (DBG) console.log("[render] skipped re-entrant applyZoom()");
-            return;
-        }
+        if (__isRendering) { if (DBG) console.log("[render] skipped re-entrant applyZoom()"); return; }
         __isRendering = true;
 
         try {
-            // Wrap draw calls with timing + error safety.
-            if (typeof drawAxis === "function") {
-                timed("drawAxis", () => safe(drawAxis, "drawAxis"));
-            }
-            if (typeof drawCards === "function") {
-                timed("drawCards", () => safe(drawCards, "drawCards"));
-            }
+            // 0) compute data-driven prefocus for current transform
+            computePrefocusData();
 
-            // Enforce layer order even if a draw step failed.
+            // 1) draw
+            if (typeof drawAxis === "function") timed("drawAxis", () => safe(drawAxis, "drawAxis"));
+            if (typeof drawCards === "function") timed("drawCards", () => safe(drawCards, "drawCards"));
+
+            // 2) mark prefocus on rendered nodes (no feedback loop)
+            markPrefocusClass();
+
             setZOrder();
         } finally {
             __isRendering = false;
         }
-        requestPrefocusUpdate();
     }
 
     // v41: simple mode-lock — zoom OR pan per gesture (no mixing)

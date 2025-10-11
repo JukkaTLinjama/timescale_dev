@@ -482,16 +482,18 @@ svg .zoomBar .hit {
 }
 /* v42: continuous focus highlight for the nearest-to-center EVENT (label only) */
 text.event-label.prefocus {
-    font-size: 12px;
-    /* slightly larger than default */
+    /* keep size -> no reflow jump */
     font-weight: 700;
     letter-spacing: 0.2px;
-    transition: font-size .15s ease, letter-spacing .15s ease;
-    /* thin readability outline */
+    /* no font-size transition needed anymore */
     paint-order: stroke;
     stroke: rgba(0, 0, 0, 0.35);
     stroke-width: 0.6px;
     stroke-linejoin: round;
+}
+text.event-label {
+    transition: transform 380ms ease-out;
+    will-change: transform;
 }
 /* v42.3: Event "More info" popover (animated) */
 #event-info {
