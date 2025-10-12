@@ -1,4 +1,4 @@
-// timeline.js — v43.1 2024-06-11
+// timeline.js — v43.2 2024-06-12
 // using new metadata format in evetnsDB.json with relative time to present
 
 // Safe debug logger (no-op unless ?debug=1 used)
@@ -46,7 +46,12 @@ let __isRendering = false;
         margin: { top: 12, right: 54, bottom: 12, left: 54 },
         zoomBar: { width: 22, gap: 10 },     // oikean reunan zoom-palkki
         card: { minW: 160, pad: 10 },
-        palette: ["#6372b2ff", "#70a8c6", "#4b9fa8", "#368d60ff", "#5a9646ff"] // korttien värit
+        palette: ["#6372b2ff", "#70a8c6", "#4b9fa8", "#368d60ff", "#5a9646ff"], // korttien värit
+          // v43.2: Prefocus appears only near the center; otherwise no focus at all.
+        prefocus: {
+            radiusPx: 16,      // must be within this many pixels from the midline to turn ON
+            hysteresisPx: 8    // extra allowance to stay ON before turning OFF
+        }
     };
     const ACTIVATE_DELAY = 1000; // ms ennen kuin kortti saa .active
     const ZOOM_DELAY = 1500;     // ms ennen zoom-animaatiota (säilytettiin pyyntösi mukaisena)
@@ -362,30 +367,69 @@ let __isRendering = false;
     }
 
     function computePrefocusData() {
-        // Pick the event whose data-y is closest to the focus anchor
-        if (!state.events || !state.events.length || !state.y) return;
+        if (!state.events || !state.events.length || !state.y) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+
         const cy = getFocusAnchorY();
 
-        let best = null, bestDist = Infinity;
+        // 1) Find the event whose Y position is closest to the screen center
+        let best = null;
+        let bestDist = Infinity;
         for (const e of state.events) {
             const yy = state.y(e.time_years);
             const d = Math.abs(yy - cy);
-            if (d < bestDist) { best = e; bestDist = d; }
+            if (d < bestDist) {
+                best = e;
+                bestDist = d;
+            }
         }
 
-        state.__prefocusKey = best ? (best.label + best.time_years) : null;
-        state.__prefocusY = best ? state.y(best.time_years) : null;
+        if (!best) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+
+        // 2) Apply distance threshold + hysteresis
+        const R = (cfg.prefocus && +cfg.prefocus.radiusPx) || 36;
+        const H = (cfg.prefocus && +cfg.prefocus.hysteresisPx) || 0;
+
+        const prevKey = state.__prefocusKey || null;
+        const candKey = best.label + best.time_years;
+
+        // If we are already focused on the same event, allow slightly larger distance
+        const allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
+
+        // 3) Only keep prefocus if event is within allowed distance
+        if (bestDist <= allowed) {
+            state.__prefocusKey = candKey;
+            state.__prefocusY = state.y(best.time_years);
+        } else {
+            // No nearby event → no prefocus at all
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+        }
     }
 
     function markPrefocusClass() {
-        // Apply .prefocus to the freshly rendered label matching the cached key
         const key = state.__prefocusKey;
+
+        // Clear previous prefocus marks
         d3.selectAll("text.event-label").classed("prefocus", false);
-        if (!key) return;
+        d3.selectAll("g.e").classed("is-prefocus", false);
+
+        if (!key) return; // nothing nearby → nothing highlighted
+
+        // Mark both the event group and its label
         d3.selectAll("g.e")
             .filter(d => (d && (d.label + d.time_years) === key))
-            .select("text.event-label")
-            .classed("prefocus", true);
+            .each(function () {
+                d3.select(this).classed("is-prefocus", true);
+                d3.select(this).select("text.event-label").classed("prefocus", true);
+            });
     }
 
     // --- v43.3: vertical offset for neighbors of focused text ---

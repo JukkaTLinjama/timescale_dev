@@ -480,16 +480,32 @@ svg .zoomBar .hit {
     /* If/when you want the pad to handle zoom-only input, switch to:
      pointer-events: all; touch-action: none; */
 }
-/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) */
+/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) *//* v43.2: Bigger, smoother pre-focus highlight */
 text.event-label.prefocus {
-    /* keep size -> no reflow jump */
-    font-weight: 700;
-    letter-spacing: 0.2px;
-    /* no font-size transition needed anymore */
+    font-size: 13.5px;          /* was 12px */
+    font-weight: 800;           /* bolder */
+    letter-spacing: 0.25px;
+    /* Use transform for smooth scaling without layout jumps */
+    transform: scale(1.12);
+    transform-box: fill-box;    /* scale around the text's own box */
+    transform-origin: 0% 50%;   /* left-center keeps label aligned to tick */
+    /* Softer, longer ease-out */
+    transition: transform .18s ease-out,
+                font-size .18s ease-out,
+                letter-spacing .18s ease-out,
+                stroke-width .18s ease-out;
+    /* Slightly stronger readability outline */
     paint-order: stroke;
-    stroke: rgba(0, 0, 0, 0.35);
-    stroke-width: 0.6px;
-    stroke-linejoin: round;
+    stroke: rgba(0,0,0,0.40);
+    stroke-width: 0.9px;        /* was 0.6px */
+}
+
+/* v43.2: Also highlight the horizontal event marker line for the prefocused item */
+g.e.is-prefocus line.event-line {
+    stroke: var(--accent);
+    stroke-width: 2px;          /* thicker line under the focused label */
+    opacity: 0.95;
+    transition: stroke-width .18s ease-out, opacity .18s ease-out;
 }
 text.event-label {
     transition: transform 380ms ease-out;
