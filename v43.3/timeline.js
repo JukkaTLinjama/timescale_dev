@@ -13,9 +13,48 @@ const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : unde
 let __isRendering = false;
 
 (() => {
-    const cfg = (window.TS_CFG || {});
-    const ACTIVATE_DELAY = (window.TS_DELAY && TS_DELAY.ACTIVATE) || 1000;
-    const ZOOM_DELAY = (window.TS_DELAY && TS_DELAY.ZOOM) || 1500;
+    // v38 viewport fix for iOS Chrome/Safari
+    (function v38ViewportFix() {
+        const root = document.documentElement;
+
+        function apply() {
+            // 1) lue “oikea” näkyvä korkeus (visualViewport), fallback window.innerHeightiin
+            const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0;
+            root.style.setProperty('--vhpx', `${Math.round(vh)}px`); // kommentti: pikseleinä → CSS: calc(var(--vhpx) ...)
+
+            // 2) mittaa otsikon ja footerin todellinen korkeus → aseta CSS-muuttujiksi (CSS jo käyttää niitä)
+            const hdr = document.getElementById('page-title');
+            const ftr = document.getElementById('page-footer');
+            const hH = hdr ? Math.round(hdr.getBoundingClientRect().height) : 0;
+            const fH = ftr ? Math.round(ftr.getBoundingClientRect().height) : 0;
+            root.style.setProperty('--header-h', `${hH}px`);
+            root.style.setProperty('--footer-h', `${fH}px`);
+        }
+
+        // ensilaskenta
+        apply();
+
+        // reagoi selainpalkin muutoksiin iOS:ssä
+        window.addEventListener('resize', apply, { passive: true });
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', apply, { passive: true });
+            window.visualViewport.addEventListener('scroll', apply, { passive: true });
+        }
+    })();
+
+    const cfg = {
+        margin: { top: 12, right: 54, bottom: 12, left: 54 },
+        zoomBar: { width: 22, gap: 10 },     // oikean reunan zoom-palkki
+        card: { minW: 160, pad: 10 },
+        palette: ["#6372b2ff", "#70a8c6", "#4b9fa8", "#368d60ff", "#5a9646ff"], // korttien värit
+          // v43.2: Prefocus appears only near the center; otherwise no focus at all.
+        prefocus: {
+            radiusPx: 16,      // must be within this many pixels from the midline to turn ON
+            hysteresisPx: 8    // extra allowance to stay ON before turning OFF
+        }
+    };
+    const ACTIVATE_DELAY = 1000; // ms ennen kuin kortti saa .active
+    const ZOOM_DELAY = 1500;     // ms ennen zoom-animaatiota (säilytettiin pyyntösi mukaisena)
 
     // --- tila ---
     const state = {
@@ -72,6 +111,105 @@ let __isRendering = false;
         .attr("class", "centerZoomLabel")
         .text("zoom <->");
 
+    // v42.3 (click-only): Basic config for the info popover
+    const infoCfg = {
+        margin: 10 // viewport clamping margin in px
+    };
+
+    // v42.3: Singleton popover element management
+    let infoEl = null;
+
+    /** Ensure the singleton info element exists. */
+    function ensureInfoEl() {
+        if (infoEl && infoEl.parentNode) return infoEl;
+        infoEl = document.createElement('div');
+        infoEl.id = 'event-info';
+        document.body.appendChild(infoEl);
+
+        // stop clicks from bubbling to document (which would close it)
+        infoEl.addEventListener('click', (e) => e.stopPropagation());
+        return infoEl;
+    }
+
+    /** Hide/dismiss the popover with an exit animation. */
+    function hideEventInfo() {
+        if (!infoEl) return;
+        // Remove the visible class; CSS handles fade-out.
+        infoEl.classList.remove('is-visible');
+    }
+
+    // v42.3: hide info popup when any gesture or viewport motion starts
+    function onViewportMotion() {
+        hideEventInfo();
+    }
+
+    // Close on background click or ESC
+    document.addEventListener('click', hideEventInfo);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideEventInfo(); });
+
+    /** Build HTML content for a given event object. */
+    function buildEventHTML(ev) {
+        const label = ev?.label || 'Event';
+        const year = (ev?.year ?? '').toString();
+        const comments = (ev?.comments || '').trim();
+        const ref = (ev?.ref || '').trim();
+
+        const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
+        const body = comments ? `<div class="body">${comments}</div>` : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+        const link = ref && /^https?:\/\//i.test(ref)
+            ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
+            : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
+
+        return `
+    <div class="title">${label}</div>
+    <div class="meta">${meta}</div>
+    ${body}
+    ${link}
+    <div class="hint">Tip: click outside to close.</div>
+  `;
+    }
+    /**
+     * Show the popover near the event's label and animate it in.
+     * Uses class-based visibility so CSS transitions can run.
+     */
+    function showEventInfo(ev, screenBox) {
+        const el = ensureInfoEl();
+        el.innerHTML = buildEventHTML(ev);
+
+        // Make it "measurable" while still hidden (no flicker):
+        // Ensure visible styles are not yet applied to allow positioning first.
+        el.classList.remove('is-visible');
+
+        // Position based on content size
+        // Temporarily force visibility for accurate measurement without opacity jump
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px) scale(0.98)';
+
+        // Next frame: measure and place
+        requestAnimationFrame(() => {
+            const rect = el.getBoundingClientRect(); // current size is fine even hidden
+            const M = infoCfg.margin;
+
+            let x = Math.round(screenBox.left + 12);
+            let y = Math.round(screenBox.top - rect.height - 8);
+
+            if (y < M) y = Math.round(screenBox.bottom + 8);
+            if (x + rect.width + M > window.innerWidth) x = Math.max(M, window.innerWidth - rect.width - M);
+            if (y + rect.height + M > window.innerHeight) y = Math.max(M, window.innerHeight - rect.height - M);
+
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+
+            // Next frame: reveal with animation
+            requestAnimationFrame(() => {
+                el.style.visibility = '';  // back to stylesheet control
+                el.style.opacity = '';
+                el.style.transform = '';
+                el.classList.add('is-visible');
+            });
+        });
+    }
 
     // --- apufunktiot ---
     function setZOrder() {
@@ -85,9 +223,6 @@ let __isRendering = false;
     function scaleByAt(selection, zoomBehavior, factor, x, y) {
         // Use D3's built-in zoom.scaleBy with a specific pointer anchor
         selection.call(zoomBehavior.scaleBy, factor, [x, y]);
-    }
-    function onViewportMotion() {
-        if (window.InfoBox && InfoBox.hide) InfoBox.hide();
     }
 
     function layout() {
@@ -297,6 +432,20 @@ let __isRendering = false;
             });
     }
 
+    // --- v43.3: vertical offset for neighbors of focused text ---
+    function computeTextFocusOffsetY(yEvt, yFoc) {
+        const R = 40;   // influence radius in px
+        const MAX = 8; // max |Δy| very near focus
+        const dy = yEvt - yFoc;
+        const ady = Math.abs(dy);
+        if (ady === 0 || ady >= R) return 0; // focused itself stays fixed
+        const t = 1 - ady / R;
+        const strength = Math.pow(t, 1.0);
+        const dir = Math.sign(dy); // above = -, below = +
+        return dir * MAX * strength;
+    }
+
+
     function innerWidth() { return Math.max(0, state.width - cfg.margin.left - cfg.margin.right); }
     function innerHeight() { return Math.max(0, state.height - cfg.margin.top - cfg.margin.bottom); }
 
@@ -322,46 +471,47 @@ let __isRendering = false;
         return state.themeColors.get(t);
     }
 
+    // timeline.js v36 — v32-logiikka: major-tickit akselissa, minor-viivat .minor-grid:iin
     function drawAxis() {
-        // y: log-scale. We compute tick values here, rendering stays in this function.
         const y = state.y;
         const [d0, d1] = y.domain();
 
-        // ---- Major ticks: 10^n ----
-        const { exponents, values: majors } = Ticks.majorsFromDomain(d0, d1);
+        // major: 10^n
+        const n0 = Math.floor(Math.log10(d0));           // v37 fix: floor,floor → toimii myös vajaassa dekadissa
+        const n1 = Math.floor(Math.log10(d1));
+        const majors = d3.range(n0, n1 + 1)              // pidä vain domainiin osuvat majorit
+            .map(e => 10 ** e)
+            .filter(v => v >= d0 && v <= d1);
 
-        // Render major ticks (no text yet, we build 10^n labels below)
-        const axis = d3.axisLeft(y)
-            .tickValues(majors)
-            .tickSize(4)
-            .tickFormat(() => ""); // empty: we draw superscript ourselves
+        // 1) Akseli: vain major-tickit, ei oletustekstiä
+        const axis = d3.axisLeft(y).tickValues(majors).tickSize(4).tickFormat(() => "");
         gAxis.call(axis);
 
-        // Build labels like “10^n” using tspans (superscript)
-        gAxis.selectAll("g.tick > text").text("");
-        gAxis.selectAll("g.tick").each(function (d, i) {
-            const exp = exponents[i] ?? Math.floor(Math.log10(d));
-            const t = d3.select(this).select("text");
+        // 2) Major-tickien labeli “10^n”; minor-tickeillä ei tekstejä (koska niitä ei piirretä akselille)
+        gAxis.selectAll("g.tick > text").text(""); // varmuus tyhjennys
+        gAxis.selectAll("g.tick").each(function (d) {
+            const exp = Math.floor(Math.log10(d));
+            const t = d3.select(this).select("text").text(null);
             t.append("tspan").text("10");
-            t.append("tspan")
-                .attr("baseline-shift", "super")
-                .attr("font-size", "9px")
-                .text(exp);
+            t.append("tspan").attr("baseline-shift", "super").attr("font-size", "9px").text(exp);
         });
 
-        // ---- Minor ticks: 2..9 × 10^n ----
+        // 3) Minor-viivat .minor-grid-ryhmään (2..9 × 10^n) — vain jos ei liian tiheää
         gMinor.selectAll("*").remove();
-
-        // Show minors only when a reasonable number of decades is visible
-        const n0 = Math.floor(Math.log10(d0)), n1 = Math.floor(Math.log10(d1));
-        const visibleDecades = n1 - n0 + 1;
-        const showMinor = visibleDecades <= 12;
-
-        const minors = Ticks.minorsFromDomain(d0, d1, showMinor);
-        for (const v of minors) {
-            gMinor.append("line")
-                .attr("x1", -4).attr("x2", 0)
-                .attr("y1", y(v)).attr("y2", y(v));
+        const visibleDecades = n1 - n0 + 1;                 // kuinka monta dekadia näkyy
+        const showMinor = visibleDecades <= 12;              // kynnys kuten v32: “riittävän väljä”
+        if (showMinor) {
+            for (let e = n0; e <= n1; e++) {
+                for (let m = 2; m <= 9; m++) {
+                    const v = m * 10 ** e;
+                    if (v >= d0 && v <= d1) {
+                        gMinor.append("line")
+                            .attr("x1", -4).attr("x2", 0)     // lyhyt pisto akselin oikealle
+                            .attr("y1", y(v)).attr("y2", y(v));
+                        // HUOM: ei väriä/opacityä JS:ssä → kaikki tyyli CSS:ään
+                    }
+                }
+            }
         }
     }
 
@@ -467,7 +617,7 @@ let __isRendering = false;
 
                 // v43.4: vertical halo around the data-driven prefocus
                 const yFoc = (state.__prefocusY != null) ? state.__prefocusY : getFocusAnchorY();
-                const textOffsetY = Util.textHaloOffset(yy, yFoc);
+                const textOffsetY = computeTextFocusOffsetY(yy, yFoc);
 
                 gg.select("text.event-label")
                     .attr("x", 12)
@@ -487,7 +637,7 @@ let __isRendering = false;
                         // Prefer anchoring to the label if present, else to the group bbox
                         const labelNode = d3.select(this).select('text.event-label').node();
                         const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
-                        InfoBox.show(evData, box); // <- uses your existing helper
+                        showEventInfo(evData, box); // <- uses your existing helper
                     } catch (_) {
                         // Fallback: place near screen center if bbox fails
                         const fake = {
@@ -496,7 +646,7 @@ let __isRendering = false;
                             right: window.innerWidth / 2 + 40,
                             bottom: window.innerHeight / 2 + 20
                         };
-                        InfoBox.show(evData, fake);
+                        showEventInfo(evData, fake);
                     }
                 });
             // v40: ensure correct z-order right after toggling activation.
@@ -558,6 +708,108 @@ let __isRendering = false;
         } finally {
             __isRendering = false;
         }
+    }
+
+    // v41: simple mode-lock — zoom OR pan per gesture (no mixing)
+    function setupGlobalSwipeZoom(svgSel, zoomBehavior) {
+        const DEAD = 3;              // px jitter ignore
+        const DOM = 1.5;             // horizontal must dominate vertical by this ratio to choose zoom
+        const SENS_TOUCH = -0.006;   // reversed mapping: right = out, left = in
+        const SENS_MOUSE = -0.003;   // desktop sensitivity
+        const STEP = 20;             // cap per-frame delta (px)
+        const CLAMP_MIN = 0.95, CLAMP_MAX = 1.05; // per-step zoom bounds
+
+        let active = false;
+        let mode = null;             // null | 'zoom' | 'pan'
+        let startX = 0, startY = 0, lastX = 0, lastY = 0;
+
+        // --- v42: vaakazoom sallitaan vain keskialueelta ---
+        function inCenterZone(y) {
+            const H = innerHeight();                 // käytä nykyistä sisäkorkeutta
+            const zoneH = Math.max(80, Math.min(H * 0.36, 160)); // 80–160 px (~36% H)
+            const y0 = (H - zoneH) / 2, y1 = y0 + zoneH;
+            return y >= y0 && y <= y1;
+        }
+        let startInCenter = false;
+
+        const isTouch = (e) => e.pointerType === 'touch';
+        const svgNode = svgSel.node();
+        const contEl = document.getElementById('timeline-container');
+        function setGestureActive(on) {
+            if (on) {
+                svgNode.classList.add('gesture-active');
+                if (contEl) contEl.classList.add('gesture-active');
+            } else {
+                svgNode.classList.remove('gesture-active');
+                if (contEl) contEl.classList.remove('gesture-active');
+            }
+        }
+
+        // Pointer down: estä D3-zoomin oma “start” → hoidamme itse lukituksen
+        svgSel.node().addEventListener('pointerdown', (e) => {
+            if (!e.isPrimary) return;
+            active = true;
+            mode = null;
+            startX = lastX = e.clientX;
+            startY = lastY = e.clientY;
+
+            // v42: lukitse tieto siitä, alkoiko ele keskialueelta
+            startInCenter = inCenterZone(e.clientY);
+
+            try { e.target.setPointerCapture(e.pointerId); } catch { }
+            e.stopPropagation();
+        }, { passive: true, capture: true });
+
+        svgSel.node().addEventListener('pointermove', (e) => {
+            if (!active || !e.isPrimary) return;
+
+            const dxTot = e.clientX - startX;
+            const dyTot = e.clientY - startY;
+
+            if (mode === null && (Math.abs(dxTot) >= DEAD || Math.abs(dyTot) >= DEAD)) {
+                const horizDominates = (Math.abs(dxTot) > Math.abs(dyTot) * DOM);
+
+                // v42: jos hor. dominoi mutta aloitus EI ollut keskialueella → pakota pan
+                if (horizDominates && startInCenter) {
+                    mode = 'zoom';
+                } else {
+                    mode = 'pan';
+                }
+                setGestureActive(true);
+            }
+
+            if (mode === 'zoom') {
+                const dxStep = Math.max(-STEP, Math.min(STEP, e.clientX - lastX));
+                if (Math.abs(dxStep) >= DEAD) {
+                    lastX = e.clientX;
+                    const sens = isTouch(e) ? SENS_TOUCH : SENS_MOUSE;
+                    const factor = Math.max(CLAMP_MIN, Math.min(CLAMP_MAX, 1 + dxStep * sens));
+                    svgSel.call(zoomBehavior.scaleBy, factor, [e.clientX, e.clientY]);
+                }
+                // Älä koskaan anna D3:n pannata zoom-moodissa
+                e.stopPropagation();
+                return;
+            }
+
+            if (mode === 'pan') {
+                const dyStep = Math.max(-STEP, Math.min(STEP, e.clientY - lastY));
+                if (Math.abs(dyStep) >= DEAD) {
+                    lastY = e.clientY;
+                    svgSel.call(zoomBehavior.translateBy, 0, dyStep);
+                }
+                // Pidetään D3 ulkona myös pan-moodissa → ei tuplapannia
+                e.stopPropagation();
+                return;
+            }
+
+            // mode === null: odotetaan päätöstä eikä päästetä D3:a starttaamaan
+            e.stopPropagation();
+        }, { passive: true, capture: true });
+
+        const end = () => { active = false; mode = null; setGestureActive(false); };
+        svgSel.node().addEventListener('pointerup', end, { passive: true, capture: true });
+        svgSel.node().addEventListener('pointercancel', end, { passive: true, capture: true });
+        svgSel.node().addEventListener('lostpointercapture', end, { passive: true, capture: true });
     }
 
     // --- zoom käyttäytyminen ---
@@ -741,8 +993,7 @@ let __isRendering = false;
                 .translateExtent([[x0, y0], [x1, y1]]);
         }
 
-        SwipeZoom.attach(svg, zoomBehavior, { innerHeight });
-
+        setupGlobalSwipeZoom(svg, zoomBehavior); // v41: one-finger horizontal swipe -> zoom
         svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
 
         // lataa & piirrä
