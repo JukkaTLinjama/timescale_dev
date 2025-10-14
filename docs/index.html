@@ -127,69 +127,136 @@
         })();
     </script>
     <script>
+        // -----------------------------------------------------------
+        // TS_CFG / TS_DELAY
+        // Global configuration objects used by timeline.js
+        // Keep them here so values are easy to tweak without touching JS files.
+        // -----------------------------------------------------------
         window.TS_CFG = {
+            // Margins for the timeline viewport (pixels)
             margin: { top: 12, right: 54, bottom: 12, left: 54 },
+
+            // Right-side zoom bar dimensions
             zoomBar: { width: 22, gap: 10 },
+
+            // Event card layout parameters
             card: { minW: 160, pad: 10 },
+
+            // Color palette used for event themes
             palette: ["#6372b2ff", "#70a8c6", "#4b9fa8", "#368d60ff", "#5a9646ff"],
+
+            // Prefocus halo behavior (for focus highlight transitions)
             prefocus: { radiusPx: 16, hysteresisPx: 8 }
         };
+
+        // Global timing delays for UI interactions (ms)
         window.TS_DELAY = { ACTIVATE: 1000, ZOOM: 1500 };
     </script>
-    <script>
-        (function () {
-            const infoCfg = { margin: 10 };
-            let infoEl = null;
 
+    <script>
+        // -----------------------------------------------------------
+        // InfoBox module
+        // Handles the small popup panel showing detailed info about an event.
+        // Encapsulated in an IIFE so it doesn't leak global variables.
+        // Accessible through window.InfoBox.show(event, screenBox)
+        // and window.InfoBox.hide().
+        // -----------------------------------------------------------
+        (function () {
+            const infoCfg = { margin: 10 };  // minimal distance from window edges (px)
+            let infoEl = null;               // singleton DOM element for the popup
+
+            // Ensure the info box element exists (lazy creation)
             function ensureInfoEl() {
                 if (infoEl && infoEl.parentNode) return infoEl;
                 infoEl = document.createElement('div');
                 infoEl.id = 'event-info';
                 document.body.appendChild(infoEl);
+                // Prevent clicks inside the box from bubbling (so it doesn’t close)
                 infoEl.addEventListener('click', e => e.stopPropagation());
                 return infoEl;
             }
 
+            // Build inner HTML structure for the info popup based on event data
             function buildEventHTML(ev) {
                 const label = ev?.display_label || ev?.label || 'Event';
                 const year = (ev?.year ?? '').toString();
-                const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
+                const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null]
+                    .filter(Boolean)
+                    .join(' · ');
                 const comments = (ev?.comments || '').trim();
                 const ref = (ev?.ref || '').trim();
-                const body = comments ? `<div class="body">${comments}</div>` : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+
+                // Main text or placeholder if no comments
+                const body = comments
+                    ? `<div class="body">${comments}</div>`
+                    : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+
+                // Optional reference link
                 const link = ref && /^https?:\/\//i.test(ref)
                     ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
                     : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
-                return `<div class="title">${label}</div><div class="meta">${meta}</div>${body}${link}<div class="hint">Tip: click outside to close.</div>`;
+
+                // Final assembled HTML
+                return `
+            <div class="title">${label}</div>
+            <div class="meta">${meta}</div>
+            ${body}${link}
+            <div class="hint">Tip: click outside to close.</div>
+        `;
             }
 
+            // Show the info box at a screen position derived from the event’s bounding box
             function show(ev, screenBox) {
                 const el = ensureInfoEl();
                 el.innerHTML = buildEventHTML(ev);
                 el.classList.remove('is-visible');
+                // Initial hidden state for animation (fade + small scale)
                 el.style.visibility = 'hidden';
                 el.style.opacity = '0';
                 el.style.transform = 'translateY(6px) scale(0.98)';
+
                 requestAnimationFrame(() => {
-                    const rect = el.getBoundingClientRect(), M = infoCfg.margin;
+                    const rect = el.getBoundingClientRect();
+                    const M = infoCfg.margin;
                     let x = Math.round(screenBox.left + 12);
                     let y = Math.round(screenBox.top - rect.height - 8);
+
+                    // If it would go offscreen above, move below the event instead
                     if (y < M) y = Math.round(screenBox.bottom + 8);
-                    if (x + rect.width + M > innerWidth) x = Math.max(M, innerWidth - rect.width - M);
-                    if (y + rect.height + M > innerHeight) y = Math.max(M, innerHeight - rect.height - M);
-                    el.style.left = `${x}px`; el.style.top = `${y}px`;
-                    requestAnimationFrame(() => { el.style.visibility = ''; el.style.opacity = ''; el.style.transform = ''; el.classList.add('is-visible'); });
+                    // Clamp to right and bottom edges
+                    if (x + rect.width + M > innerWidth)
+                        x = Math.max(M, innerWidth - rect.width - M);
+                    if (y + rect.height + M > innerHeight)
+                        y = Math.max(M, innerHeight - rect.height - M);
+
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+
+                    // Trigger CSS transition to visible state
+                    requestAnimationFrame(() => {
+                        el.style.visibility = '';
+                        el.style.opacity = '';
+                        el.style.transform = '';
+                        el.classList.add('is-visible');
+                    });
                 });
             }
 
-            function hide() { const el = ensureInfoEl(); el.classList.remove('is-visible'); }
+            // Hide the info box (simply remove visible class)
+            function hide() {
+                const el = ensureInfoEl();
+                el.classList.remove('is-visible');
+            }
 
+            // Close on click outside or Escape key
             document.addEventListener('click', hide);
             document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
 
+            // Expose public API
             window.InfoBox = { show, hide };
         })();
     </script>
+
     <script>
         // -----------------------------------------------
         // SwipeZoom module: handles touch and mouse gestures for zooming and panning
