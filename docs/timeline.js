@@ -1,5 +1,6 @@
-// timeline.js — v43.2 2024-06-12
+// timeline.js — v44 2024-06-14
 // using new metadata format in evetnsDB.json with relative time to present
+// v44 refactoring functions to index.html scripts
 
 // Safe debug logger (no-op unless ?debug=1 used)
 const DBG = !!window.__DBG__;
@@ -8,6 +9,20 @@ const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
 const U = window.Util || {};
 const safe = U.safe || ((fn) => (typeof fn === "function" ? fn() : undefined));
 const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : undefined));
+const Util = window.Util || (window.Util = {});
+if (typeof Util.cardMetrics !== "function") {
+    Util.cardMetrics = function (titleSel, groupSel, yTopEv, yBotEv, viewH) {
+        const titleH = 10;
+        const evH = 9;
+        const topPad = titleH + 6;
+        const botPad = Math.ceil(evH * 2.2) + 8;
+        const yRect = Math.min(yTopEv, yBotEv) - topPad;
+        const hRect = Math.abs(yBotEv - yTopEv) + topPad + botPad;
+        const fullyAbove = (yRect + hRect) < 15;
+        const fullyBelow = yRect > viewH;
+        return { topPad, botPad, yRect, hRect, fullyAbove, fullyBelow };
+    };
+}
 
 // Prevent overlapping renders and allow quick perf timing in debug mode.
 let __isRendering = false;
@@ -146,80 +161,55 @@ let __isRendering = false;
         zoomWin.attr("x", 2).attr("width", cfg.zoomBar.width - 4).attr("y", 0).attr("height", innerH - 1); // synkassa taustan kanssa
     }
 
-    // v42: layout for the center hairline, label, and (future) pad
     function layoutCenterOverlay() {
         const w = state.width;
         const h = state.height;
-        const zoneH = Math.max(80, Math.min(h * 0.36, 160)); // 80–160 px using current svg height
-        const zoneY = (h - zoneH) / 2;
-        const midY = Math.round(h / 2);
 
-        // Invisible pad (kept non-interactive for now)
-        centerZoomPad
-            .attr("x", 0)
-            .attr("y", zoneY)
-            .attr("width", w)
-            .attr("height", zoneH);
-
-        // --- Compute dynamic left/right stops so the hairline does not overlap axis or zoom bar ---
-        const DEFAULT_LEFT_INSET = 14; // safe fallback gap from the very left
-        const DEFAULT_RIGHT_INSET = 4; // safe fallback gap from the very right
-        const AXIS_GAP = 1;            // extra space after axis
-        const ZOOMB_GAP = 15;            // extra space before zoom bar
-
-        // Measure axis right edge (prefer a concrete axis group)
+        // --- Measure current axis right edge (prefer concrete axis group) ---
         let axisRight = NaN;
         const axisSel = svg.select("g.axis");
         if (!axisSel.empty()) {
             try {
                 const ab = axisSel.node().getBBox();
-                axisRight = ab.x + ab.width; // right edge of axis group
+                axisRight = ab.x + ab.width; // rightmost pixel of the axis group
             } catch (_) { }
         }
 
-        // Measure zoom bar left edge (prefer the .track rect; fallback to the group)
+        // --- Measure current zoom bar left edge (prefer its .track rect) ---
         let zoomBarLeft = NaN;
         let zoomBarTarget = svg.select("g.zoomBar .track");
         if (zoomBarTarget.empty()) zoomBarTarget = svg.select("g.zoomBar");
         if (!zoomBarTarget.empty()) {
             try {
                 const zb = zoomBarTarget.node().getBBox();
-                zoomBarLeft = zb.x; // left edge of zoom bar/track
+                zoomBarLeft = zb.x; // leftmost pixel of the zoom bar/track
             } catch (_) { }
         }
 
-        // Build the desired endpoints with sensible fallbacks
-        let xLeft = isFinite(axisRight) ? Math.ceil(axisRight + AXIS_GAP) : DEFAULT_LEFT_INSET;
-        let xRight = isFinite(zoomBarLeft) ? Math.floor(zoomBarLeft - ZOOMB_GAP) : (w - DEFAULT_RIGHT_INSET);
+        // --- Compute pure geometry (no DOM inside) ---
+        const geom = (window.CenterBand && CenterBand.compute)
+            ? CenterBand.compute(w, h, axisRight, zoomBarLeft)
+            : { zoneY: (h - 120) / 2, zoneH: 120, midY: Math.round(h / 2), xLeft: 14, xRight: w - 4 }; // safe fallback
 
-        // Clamp to the viewport
-        xLeft = Math.max(0, Math.min(xLeft, w - DEFAULT_RIGHT_INSET));
-        xRight = Math.max(DEFAULT_LEFT_INSET, Math.min(xRight, w));
-
-        // If the computed span is suspiciously short, revert to wide defaults
-        const span = xRight - xLeft;
-        if (span < w * 0.3) {
-            xLeft = DEFAULT_LEFT_INSET + (isFinite(axisRight) ? Math.min(axisRight + AXIS_GAP, 40) : 0);
-            xRight = w - DEFAULT_RIGHT_INSET - (isFinite(zoomBarLeft) ? Math.min((w - zoomBarLeft) + ZOOMB_GAP, 40) : 0);
-        }
-        // Still too short? Ensure a minimal centered segment as a final safety.
-        if ((xRight - xLeft) < 24) {
-            const cx = Math.round(w / 2);
-            xLeft = cx - 12;
-            xRight = cx + 12;
-        }
+        // --- Apply to DOM elements ---
+        // Invisible pad (kept non-interactive for now)
+        centerZoomPad
+            .attr("x", 0)
+            .attr("y", geom.zoneY)
+            .attr("width", w)
+            .attr("height", geom.zoneH);
 
         // Hairline (dashed accent is styled in CSS)
         centerZoomLine
-            .attr("x1", xLeft)
-            .attr("x2", xRight)
-            .attr("y1", midY)
-            .attr("y2", midY);
+            .attr("x1", geom.xLeft)
+            .attr("x2", geom.xRight)
+            .attr("y1", geom.midY)
+            .attr("y2", geom.midY);
 
-        // Label centered between the computed endpoints
+        // Label centered near the computed endpoints
         centerZoomText
-            .attr("x", Math.round((xLeft + xRight) / 1.2))  // slghtly to right side
-            .attr("y", midY - 8); // a few pixels above the line
+            .attr("x", Math.round((geom.xLeft + geom.xRight) / 1.2)) // slightly to the right
+            .attr("y", geom.midY - 8);
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
@@ -244,7 +234,7 @@ let __isRendering = false;
         let best = null;
         let bestDist = Infinity;
         for (const e of state.events) {
-            const yy = state.y(e.time_years);
+            const yy = state._yMap ? state._yMap.get(e) : state.y(e.time_years);
             const d = Math.abs(yy - cy);
             if (d < bestDist) {
                 best = e;
@@ -295,6 +285,12 @@ let __isRendering = false;
                 d3.select(this).classed("is-prefocus", true);
                 d3.select(this).select("text.event-label").classed("prefocus", true);
             });
+    }
+    // --- Safe wrapper: requestPrefocusUpdate() ---
+    // Older versions scheduled computePrefocusData + markPrefocusClass in a rAF.In v44 we no longer define it, so this stub prevents errors.
+    function requestPrefocusUpdate() {
+        if (typeof computePrefocusData === "function") computePrefocusData();
+        if (typeof markPrefocusClass === "function") markPrefocusClass();
     }
 
     function innerWidth() { return Math.max(0, state.width - cfg.margin.left - cfg.margin.right); }
@@ -369,7 +365,7 @@ let __isRendering = false;
     function drawCards() {
         const themes = state.themes;
         const w = Math.max(cfg.card.minW, innerWidth() * 0.33);
-
+        const viewH = innerHeight();
         const data = themes.map(th => {
             const list = state.events.filter(e => e.theme === th);
             const logs = list.map(e => Math.log10(e.time_years));
@@ -404,44 +400,26 @@ let __isRendering = false;
             const x = (i % 2 === 0 ? 10 : 10 + indent);
             g.attr("transform", `translate(${x},${0})`);
 
-            // --- mitataan tekstit → padit ---
             const titleSel = g.select("text.card-title").text(d.theme);
-            // otsikon bbox → yläpadin korkeus
-            const titleH = Math.ceil((() => { try { return titleSel.node().getBBox().height; } catch { return 10; } })()) || 10;
-
-            // luodaan hetkeksi piilotettu event-label mittausta varten
-            const tmp = g.append("text").attr("class", "event-label").attr("visibility", "hidden").text("X");
-            const evH = Math.ceil((() => { try { return tmp.node().getBBox().height; } catch { return 9; } })()) || 9;
-            tmp.remove();
-
-            const topPad = titleH + 6;    // pieni marginaali otsikon ja eventtien väliin
-            const botPad = Math.ceil(evH * 2.2) + 8; // v36: enemmän tilaa alimman eventin alle (säädä kerrointa 1.8–2.5)
-            // --- kortin rect-alue: eventtialue + padit ---
-            const yRect = Math.min(d.yTopEv, d.yBotEv) - topPad;
-            const hRect = Math.abs(d.yBotEv - d.yTopEv) + topPad + botPad;
+            const M = Util.cardMetrics(titleSel, g, d.yTopEv, d.yBotEv, viewH);
 
             g.select("rect")
-                .attr("x", 0).attr("y", yRect)
-                .attr("width", w).attr("height", hRect)
+                .attr("x", 0).attr("y", M.yRect)
+                .attr("width", w).attr("height", M.hRect)
                 .attr("fill", d.color).attr("fill-opacity", 0.55)
                 .attr("stroke", "#999").attr("stroke-opacity", 0.25);
+
+            g.select("text.card-title")
+                .text(d.theme)
+                .style("display", (M.fullyAbove || M.fullyBelow) ? "none" : null)
+                .attr("y", Math.max(4, M.yRect + 2))
+                .attr("dy", "0.9em");
 
             // v40: Only mark a card active when a theme is selected.
             // No selection = neutral (neither .active nor .inactive).
             const hasActive = !!state.activeTheme;
             g.classed("active", hasActive && state.activeTheme === d.theme)
                 .classed("inactive", hasActive && state.activeTheme !== d.theme);
-
-            // v36: otsikko “sticky” yläreunaan, mutta piiloon jos kortti kokonaan ulkona
-            const viewH = innerHeight();
-            const fullyAbove = (yRect + hRect) < 15;  // kortti lähes kokonaan yli yläreunan
-            const fullyBelow = yRect > viewH;         // kortti kokonaan yli alareunan
-
-            g.select("text.card-title")
-                .text(d.theme)
-                .style("display", (fullyAbove || fullyBelow) ? "none" : null)
-                .attr("y", Math.max(4, yRect + 2))  // clamp yläreunaan 4px marginaalilla
-                .attr("dy", "0.9em");
 
             // --- eventit: pysyvät absoluuttisessa y:ssä (state.y) ---
             const evSel = g.select("g.events").selectAll("g.e").data(d.events, e => e.label + e.time_years);
@@ -485,9 +463,10 @@ let __isRendering = false;
 
                     try {
                         // Prefer anchoring to the label if present, else to the group bbox
-                        const labelNode = d3.select(this).select('text.event-label').node();
+                        const label = (Util.eventLabel ? (Util.eventLabel(evData) || 'Event') : (evData.display_label || evData.label || 'Event'));
+                        const labelNode = d3.select(this).select("text.event-label").node();
                         const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
-                        InfoBox.show(evData, box); // <- uses your existing helper
+                        InfoBox.show(evData, box);
                     } catch (_) {
                         // Fallback: place near screen center if bbox fails
                         const fake = {
@@ -550,6 +529,8 @@ let __isRendering = false;
             // 1) draw
             if (typeof drawAxis === "function") timed("drawAxis", () => safe(drawAxis, "drawAxis"));
             if (typeof drawCards === "function") timed("drawCards", () => safe(drawCards, "drawCards"));
+            state._yMap = new Map();
+            for (const e of state.events) state._yMap.set(e, state.y(e.time_years));
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
             markPrefocusClass();
@@ -610,39 +591,22 @@ let __isRendering = false;
             if (!res.ok) throw new Error("eventsDB.json not found");
             const data = await res.json();
 
-            // --- metadata and UI themes (new v43) ---
-            const meta = data.metadata || {};
-            const ui = meta.ui || {};
-            const themeColors = ui.themeColors || null;
-            const themeOrder = Array.isArray(ui.themeOrder) ? ui.themeOrder : null;
-            const lang = meta.locale_default || "fi"; // default language for i18n labels
+            // --- normalize via DataUtil ---
+            const meta = data.meta || {};
+            const lang = meta.locale_default || "fi";
 
-            // --- Flatten event groups: add 'theme' to each event ---
-            state.events = (data.events || [])
-                .flatMap(g => (g.events || []).map(e => ({ ...e, theme: g.theme })));
+            const { events, themes, themeColors } = DataUtil.normalizeData(data, lang);
+            state.events = events;
+            state.themes = themes;
 
-            // --- Add display_label (supports i18n labels) ---
-            state.events = state.events.map(e => ({
-                ...e,
-                display_label:
-                    (e.i18n && e.i18n[lang] && e.i18n[lang].label)
-                        ? e.i18n[lang].label
-                        : e.label
-            }));
-
-            // --- Derive theme list (use order from metadata if provided) ---
-            state.themes = themeOrder
-                ? themeOrder.filter(t => state.events.some(e => e.theme === t))
-                : Array.from(new Set(state.events.map(e => e.theme)));
-
-            // --- Assign colors (use metadata colors if defined) ---
-            // state.themes.forEach(t => {
-            //     if (themeColors && themeColors[t]) {
-            //         state.themeColors.set(t, themeColors[t]);
-            //     } else {
-            //         colorForTheme(t);
-            //     }
-            //});
+            // assign colors (prefer metadata)
+            state.themes.forEach(t => {
+                if (themeColors && themeColors[t]) {
+                    state.themeColors.set(t, themeColors[t]);
+                } else {
+                    colorForTheme(t);
+                }
+            });
             
             computeDomainFromData();
             const sm = document.getElementById("status-message");

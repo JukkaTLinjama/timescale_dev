@@ -122,6 +122,48 @@
                 const t = 1 - ady / R;
                 return Math.sign(dy) * MAX * Math.pow(t, 1.0);
             };
+            // ---------------- Card text helpers (pure, DOM-free) ----------------
+
+            /** Preferred display label for an event (falls back to 'label'). */
+            Util.eventLabel = function (ev) {
+                return (ev?.display_label || ev?.label || '').toString();
+            };
+
+            /** One-line meta string (e.g., year + theme if present). */
+            Util.eventMeta = function (ev) {
+                const year = (ev?.year ?? '').toString();
+                const theme = ev?.theme ? `Theme: ${ev.theme}` : null;
+                return [year, theme].filter(Boolean).join(' · ');
+            };
+
+            /** Safe truncation with ellipsis; avoids breaking short strings. */
+            Util.truncate = function (str, max = 60, suffix = '…') {
+                const s = (str ?? '').toString();
+                if (max <= 0) return '';
+                if (s.length <= max) return s;
+                // preserve word boundary if possible
+                const cut = s.slice(0, max - suffix.length);
+                const ws = cut.lastIndexOf(' ');
+                return (ws >= 24 ? cut.slice(0, ws) : cut) + suffix;
+            };
+            // --- Card metrics (pure, DOM-free except bbox reads) ---
+            // Computes paddings and rect based on measured text heights.
+            Util.cardMetrics = function (titleSel, groupSel, yTopEv, yBotEv, viewH) {
+                const titleH = Math.ceil((() => { try { return titleSel.node().getBBox().height; } catch { return 10; } })()) || 10;
+                const tmp = groupSel.append("text").attr("class", "event-label").attr("visibility", "hidden").text("X");
+                const evH = Math.ceil((() => { try { return tmp.node().getBBox().height; } catch { return 9; } })()) || 9;
+                tmp.remove();
+
+                const topPad = titleH + 6;
+                const botPad = Math.ceil(evH * 2.2) + 8;
+                const yRect = Math.min(yTopEv, yBotEv) - topPad;
+                const hRect = Math.abs(yBotEv - yTopEv) + topPad + botPad;
+
+                const fullyAbove = (yRect + hRect) < 15;
+                const fullyBelow = yRect > viewH;
+
+                return { topPad, botPad, yRect, hRect, fullyAbove, fullyBelow };
+            };
 
             window.Util = Util;
         })();
@@ -428,10 +470,106 @@
             window.Ticks = { majorsFromDomain, minorsFromDomain };
         })();
     </script>
+    <script>
+        // -------------------------------------------------------
+        // CenterBand: pure math for the center zone geometry
+        // Computes the vertical center line (midY), the zoom zone band (zoneY/zoneH),
+        // and the horizontal endpoints (xLeft/xRight) for the center hairline.
+        // Inputs are plain numbers; no DOM access here to keep it reusable.
+        // -------------------------------------------------------
+        (function () {
+            /**
+             * Compute geometry for the center band and hairline.
+             * @param {number} w - svg width (outer)
+             * @param {number} h - svg height (outer)
+             * @param {number|NaN} axisRight - right edge (px) of the axis group, or NaN if unknown
+             * @param {number|NaN} zoomBarLeft - left edge (px) of the zoom bar/track, or NaN if unknown
+             * @returns {{zoneY:number, zoneH:number, midY:number, xLeft:number, xRight:number}}
+             */
+            function compute(w, h, axisRight, zoomBarLeft) {
+                // Vertical band in the middle of the screen (used as "zoom allowed" zone)
+                const zoneH = Math.max(80, Math.min(h * 0.36, 160)); // clamp 80–160 px
+                const zoneY = (h - zoneH) / 2;
+                const midY = Math.round(h / 2);
+
+                // Horizontal endpoints: keep the hairline clear of axis and zoom bar
+                const DEFAULT_LEFT_INSET = 14; // fallback padding from the left edge
+                const DEFAULT_RIGHT_INSET = 4;  // fallback padding from the right edge
+                const AXIS_GAP = 1;            // extra space after axis
+                const ZOOMB_GAP = 15;           // extra space before zoom bar
+
+                // Build endpoints with sensible fallbacks
+                let xLeft = Number.isFinite(axisRight) ? Math.ceil(axisRight + AXIS_GAP) : DEFAULT_LEFT_INSET;
+                let xRight = Number.isFinite(zoomBarLeft) ? Math.floor(zoomBarLeft - ZOOMB_GAP) : (w - DEFAULT_RIGHT_INSET);
+
+                // Clamp to viewport
+                xLeft = Math.max(0, Math.min(xLeft, w - DEFAULT_RIGHT_INSET));
+                xRight = Math.max(DEFAULT_LEFT_INSET, Math.min(xRight, w));
+
+                // If span is too short, relax a bit but stay reasonable
+                const span = xRight - xLeft;
+                if (span < w * 0.3) {
+                    const leftRelax = Number.isFinite(axisRight) ? Math.min(axisRight + AXIS_GAP, 40) : 0;
+                    const rightRelax = Number.isFinite(zoomBarLeft) ? Math.min((w - zoomBarLeft) + ZOOMB_GAP, 40) : 0;
+                    xLeft = DEFAULT_LEFT_INSET + leftRelax;
+                    xRight = w - DEFAULT_RIGHT_INSET - rightRelax;
+                }
+
+                // Final safety: ensure at least a minimal centered segment
+                if ((xRight - xLeft) < 24) {
+                    const cx = Math.round(w / 2);
+                    xLeft = cx - 12;
+                    xRight = cx + 12;
+                }
+
+                return { zoneY, zoneH, midY, xLeft, xRight };
+            }
+
+            // Expose as a tiny module
+            window.CenterBand = { compute };
+        })();
+    </script>
+<script>
+    // -------------------------------------------------------
+    // DataUtil: normalizeData()
+    // Preprocesses loaded eventsDB.json:
+    //  - merges group.theme into each event
+    //  - applies i18n labels for given language
+    //  - extracts theme order and colors
+    // -------------------------------------------------------
+    (function () {
+        function normalizeData(data, lang) {
+            const meta = data.meta || {};
+            const ui = meta.ui || {};
+            const themeOrder = Array.isArray(ui.themeOrder) ? ui.themeOrder : null;
+            const themeColors = ui.themeColors || null;
+
+            const events = (data.events || []).flatMap(g =>
+                (g.events || []).map(e => ({
+                    ...e,
+                    theme: g.theme,
+                    display_label:
+                        (e.i18n && e.i18n[lang] && e.i18n[lang].label)
+                            ? e.i18n[lang].label
+                            : e.label
+                }))
+            );
+
+            const themes = themeOrder
+                ? themeOrder.filter(t => events.some(e => e.theme === t))
+                : Array.from(new Set(events.map(e => e.theme)));
+
+            return { events, themes, themeColors };
+        }
+
+        // Expose globally for timeline.js
+        window.DataUtil = { normalizeData };
+    })();
+</script>
 
     <script src="timeline.js"></script>
     
-    <script>     // Startup animation: ---------------------------------------------
+    <script>     // Startup animation: ---------------------------------------------------------------------------
         const nav = performance.getEntriesByType('navigation')[0];
             if (nav && nav.type === 'reload') {
                 sessionStorage.removeItem('startup_v41_shown');
