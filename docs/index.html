@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v44</title>
+        <title>History Timeline v44.1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v44</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v44.1</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -217,7 +217,6 @@
                 infoEl.addEventListener('click', e => e.stopPropagation());
                 return infoEl;
             }
-
             // Build inner HTML structure for the info popup based on event data
             function buildEventHTML(ev) {
                 const label = ev?.display_label || ev?.label || 'Event';
@@ -225,26 +224,28 @@
                 const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null]
                     .filter(Boolean)
                     .join(' · ');
-                const comments = (ev?.comments || '').trim();
+
+                // Prefer localized comments prepared by DataUtil; fallback to raw comments
+                const comments = (typeof ev?.display_comments === 'string' && ev.display_comments.trim().length > 0)
+                    ? ev.display_comments.trim()
+                    : ((typeof ev?.comments === 'string') ? ev.comments.trim() : '');
+
+                // Optional reference/link (keep current behavior)
                 const ref = (ev?.ref || '').trim();
-
-                // Main text or placeholder if no comments
-                const body = comments
-                    ? `<div class="body">${comments}</div>`
-                    : `<div class="body" style="opacity:.8;">(No notes)</div>`;
-
-                // Optional reference link
                 const link = ref && /^https?:\/\//i.test(ref)
                     ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
                     : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
 
-                // Final assembled HTML
+                const body = comments
+                    ? `<div class="body">${comments}</div>`
+                    : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+
                 return `
-            <div class="title">${label}</div>
-            <div class="meta">${meta}</div>
-            ${body}${link}
-            <div class="hint">Tip: click outside to close.</div>
-        `;
+                    <div class="title">${label}</div>
+                    <div class="meta">${meta}</div>
+                    ${body}${link}
+                    <div class="hint">Tip: click outside to close.</div>
+                    `;
             }
 
             // Show the info box at a screen position derived from the event’s bounding box
@@ -534,16 +535,21 @@
     // DataUtil: normalizeData()
     // Preprocesses loaded eventsDB.json:
     //  - merges group.theme into each event
-    //  - applies i18n labels for given language
-    //  - extracts theme order and colors
+    //  - applies i18n labels for the chosen language (from metadata.locale_default)
+    //  - extracts theme order and colors from metadata.ui
     // -------------------------------------------------------
     (function () {
-        function normalizeData(data, lang) {
-            const meta = data.meta || {};
+        function normalizeData(data, langFromCaller) {
+            // Read from 'metadata' (the actual key in eventsDB.json)
+            const meta = data.metadata || {};
             const ui = meta.ui || {};
             const themeOrder = Array.isArray(ui.themeOrder) ? ui.themeOrder : null;
             const themeColors = ui.themeColors || null;
 
+            // Choose language: caller can pass one, otherwise use metadata.locale_default
+            const lang = langFromCaller || meta.locale_default || "fi";
+
+            // Flatten groups → inject theme into each event and build display_label/comments
             const events = (data.events || []).flatMap(g =>
                 (g.events || []).map(e => ({
                     ...e,
@@ -551,15 +557,20 @@
                     display_label:
                         (e.i18n && e.i18n[lang] && e.i18n[lang].label)
                             ? e.i18n[lang].label
-                            : e.label
+                            : e.label,
+                    display_comments:
+                        (e.i18n && e.i18n[lang] && e.i18n[lang].comments)
+                            ? e.i18n[lang].comments
+                            : (e.comments || "")
                 }))
             );
 
+            // Derive themes, respecting metadata.ui.themeOrder when present
             const themes = themeOrder
                 ? themeOrder.filter(t => events.some(e => e.theme === t))
                 : Array.from(new Set(events.map(e => e.theme)));
 
-            return { events, themes, themeColors };
+            return { events, themes, themeColors, langUsed: lang };
         }
 
         // Expose globally for timeline.js

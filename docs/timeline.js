@@ -1,4 +1,4 @@
-// timeline.js — v44 2024-06-14
+// timeline.js — v44.1 2024-06-15
 // using new metadata format in evetnsDB.json with relative time to present
 // v44 refactoring functions to index.html scripts
 
@@ -88,7 +88,7 @@ let __isRendering = false;
         .text("zoom <->");
 
 
-    // --- apufunktiot ---
+    // --- apufunktiot ------------------------------------
     function setZOrder() {
         gZoomTrack.lower(); // alin: kapea zoombar-tausta
         gRoot.raise();      // kaikki kortit & akseli (passiivinen sisältö)
@@ -96,6 +96,29 @@ let __isRendering = false;
         gActive.raise();    // aktiivinen kortti overlayn yläpuolelle
         gAxis.raise();   // v37 fix: akseli + tikit overlayn yläpuolelle
     }
+
+    // v44.1 – scale-aware pan bounds using your tuned base (0.6 × h)
+    // Generous when k≈1; shrinks as you zoom in so panning won't escape the window.
+    function computeTranslateExtent() {
+        const w = innerWidth();
+        const h = innerHeight();
+
+        const t = d3.zoomTransform(svg.node());
+        const k = Math.max(1e-6, t && typeof t.k === "number" ? t.k : 1);
+
+        // base overscroll factors (tuned): vertical 0.6 × h, horizontal 0.15 × w
+        // vertical shrinks with k (divide by k), horizontal shrinks gently (sqrt(k)).
+        const baseY = h * 0.60;
+        const baseX = w * 0.15;
+
+        const padY = Math.round(Math.max(80, baseY / k));                 // clamp min 80px
+        const padX = Math.round(Math.max(12, Math.min(w * 0.25, baseX / Math.sqrt(k))));
+
+        const x0 = -padX, y0 = -padY;
+        const x1 = w + padX, y1 = h + padY;
+        return [[x0, y0], [x1, y1]];
+    }
+
     // v41: smooth incremental scale around a given screen point (x,y)
     function scaleByAt(selection, zoomBehavior, factor, x, y) {
         // Use D3's built-in zoom.scaleBy with a specific pointer anchor
@@ -144,13 +167,6 @@ let __isRendering = false;
         // Update clip to the same visual width but in gCards' local coordinates (origin at 0).
         const clipWidthLocal = Math.max(0, state.width - rootTX - 8);
         plotClipRect
-            .attr("x", 0)
-            .attr("y", 0)
-            .attr("width", clipWidthLocal)
-            .attr("height", innerHeight());
-
-        // Keep the extra safety for the other clipPath variant used earlier in init()
-        d3.select("#plot-rect")
             .attr("x", 0)
             .attr("y", 0)
             .attr("width", clipWidthLocal)
@@ -445,7 +461,7 @@ let __isRendering = false;
 
                 // v43.4: vertical halo around the data-driven prefocus
                 const yFoc = (state.__prefocusY != null) ? state.__prefocusY : getFocusAnchorY();
-                const textOffsetY = Util.textHaloOffset(yy, yFoc);
+                const textOffsetY = (Util && typeof Util.textHaloOffset === 'function') ? Util.textHaloOffset(yy, yFoc): 0;
 
                 gg.select("text.event-label")
                     .attr("x", 12)
@@ -562,7 +578,7 @@ let __isRendering = false;
 
                 let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
                 try {
-                    const bb = svg.select("#plot-rect").node().getBBox();
+                    const bb = svg.select("#plotClipRect").node().getBBox();
                     x0 = bb.x;
                     y0 = bb.y - extra;
                     x1 = bb.x + bb.width;
@@ -575,7 +591,7 @@ let __isRendering = false;
                 // update extent on every zoom so pan bounds match the current scale
                 zoomBehavior
                     .extent([[0, 0], [state.width, state.height]])
-                    .translateExtent([[x0, y0], [x1, y1]]);
+                    .translateExtent(computeTranslateExtent());
             }
 
             // 3) redraw
@@ -592,7 +608,7 @@ let __isRendering = false;
             const data = await res.json();
 
             // --- normalize via DataUtil ---
-            const meta = data.meta || {};
+            const meta = data.metadata || {};
             const lang = meta.locale_default || "fi";
 
             const { events, themes, themeColors } = DataUtil.normalizeData(data, lang);
@@ -664,22 +680,10 @@ let __isRendering = false;
         }
 
         // varjo filtteri
-        const defs = svg.append("defs");
         defs.append("filter").attr("id", "shadow")
             .append("feDropShadow")
             .attr("dx", -3).attr("dy", 3).attr("stdDeviation", 3)
             .attr("flood-color", "#000").attr("flood-opacity", 0.25);
-        // v33: piirtoalueen leikkaus, estää valumisen akselin yli
-        const clip = defs.append("clipPath").attr("id", "plot-clip");
-        clip.append("rect")
-            .attr("id", "plot-rect")
-            .attr("x", 0).attr("y", 0)
-            .attr("width", innerWidth())       // heti oikeat mitat
-            .attr("height", innerHeight())
-            .attr("fill", "none")              // EI koskaan maalaa
-            .attr("stroke", "none")
-            .attr("pointer-events", "none");
-        gCards.attr("clip-path", "url(#plot-clip)");
 
         // zoom extents
         svg.call(zoomBehavior);
@@ -689,7 +693,7 @@ let __isRendering = false;
             let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
 
             try {
-                const bb = svg.select("#plot-rect").node().getBBox();
+                const bb = svg.select("#plotClipRect").node().getBBox();
                 x0 = bb.x;
                 y0 = bb.y - extra;
                 x1 = bb.x + bb.width;
@@ -702,7 +706,7 @@ let __isRendering = false;
 
             zoomBehavior
                 .extent([[0, 0], [state.width, state.height]])
-                .translateExtent([[x0, y0], [x1, y1]]);
+                .translateExtent(computeTranslateExtent());
         }
 
         SwipeZoom.attach(svg, zoomBehavior, { innerHeight });
@@ -784,7 +788,7 @@ let __isRendering = false;
                 let x0 = 0, y0 = 0, x1 = state.width, y1 = state.height;
 
                 try {
-                    const bb = svg.select("#plot-rect").node().getBBox();
+                    const bb = svg.select("#plotClipRect").node().getBBox();
                     x0 = bb.x;
                     y0 = bb.y - extra;
                     x1 = bb.x + bb.width;
@@ -796,7 +800,7 @@ let __isRendering = false;
 
                 zoomBehavior
                     .extent([[0, 0], [state.width, state.height]])
-                    .translateExtent([[x0, y0], [x1, y1]]);
+                    .translateExtent(computeTranslateExtent());
             }
 
             svg.call(zoomBehavior);

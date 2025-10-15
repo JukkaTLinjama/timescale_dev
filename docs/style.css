@@ -245,6 +245,18 @@ g.card.active rect {
             letter-spacing: .1px;
             /* pieni luettavuus-tweak */
 }
+/* v44: smooth neighbor easing for labels (prefocus offset) */
+g.cards text.event-label {
+    transition: transform 160ms ease-out;
+    will-change: transform;
+}
+
+/* optional: respect reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+    g.cards text.event-label {
+        transition: none;
+    }
+}
 
 .card-title {
     fill: #d7d5d5;    /* teemojen otsikot korteissa */
