@@ -1,4 +1,4 @@
-// timeline.js — v44.1 2024-06-15
+// timeline.js — v44 2024-06-16
 // using new metadata format in evetnsDB.json with relative time to present
 // v44 refactoring functions to index.html scripts
 
@@ -87,8 +87,16 @@ let __isRendering = false;
         .attr("class", "centerZoomLabel")
         .text("zoom <->");
 
+    // --- Present Overlay (v45 snapshot-only) ---
+    // A passive layer for the wall-clock region: thin line + small label.
+    // Pointer events disabled so it never interferes with timeline interaction.
+    // place overlay inside gRoot so it gets the same translate as cards/axis
+    const gPresent = gRoot.append("g").attr("class", "present-overlay").style("pointer-events", "none");
+    const presentLine = gPresent.append("line").attr("class", "present-line");
+    const presentText = gPresent.append("text").attr("class", "present-label");
 
     // --- apufunktiot ------------------------------------
+
     function setZOrder() {
         gZoomTrack.lower(); // alin: kapea zoombar-tausta
         gRoot.raise();      // kaikki kortit & akseli (passiivinen sisältö)
@@ -126,6 +134,38 @@ let __isRendering = false;
     }
     function onViewportMotion() {
         if (window.InfoBox && InfoBox.hide) InfoBox.hide();
+    }
+    // --- Present Overlay helpers (v45) ---
+    // Use the snapshot captured in Step 1 (from index.html / TimeEngine) if available.
+    function getSnapshotDecimalYear() {
+        if (typeof OBSERVER_SNAPSHOT_DECIMAL === "number") return OBSERVER_SNAPSHOT_DECIMAL;
+        // fallback to a local decimal-year computation if not present
+        const d = (typeof OBSERVER_SNAPSHOT_DATE !== "undefined") ? OBSERVER_SNAPSHOT_DATE : new Date();
+        const y = d.getFullYear();
+        const start = new Date(y, 0, 1);
+        const ms = d - start;
+        const day = ms / 86400000;
+        const daysInYear = ((y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0)) ? 366 : 365;
+        return y + (day / daysInYear);
+    }
+
+    // For initial static snapshot we render a single “Snapshot” marker.
+    // Its logical position on the log axis is an *age in years* (years since snapshot).
+    // That age is ~0 at the present; to avoid log(0), clamp to a tiny epsilon.
+    function getSnapshotAgeYears() {
+        const EPS_YEARS = 1 / (365 * 24 * 60 * 60 * 10); // ~0.1 sec in years (safe guard above 0)
+        return EPS_YEARS; // static v45: show a line "just above" the asymptote
+    }
+
+    // Build label text once for v45 (static).
+    function getSnapshotLabel() {
+        // If TimeEngine is present, format from the real snapshot date for clarity
+        const d = (typeof OBSERVER_SNAPSHOT_DATE !== "undefined") ? OBSERVER_SNAPSHOT_DATE : new Date();
+        // short local time: HH:MM:SS
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `Snapshot — ${hh}:${mm}:${ss}`;
     }
 
     function layout() {
@@ -175,6 +215,7 @@ let __isRendering = false;
         setZOrder();  // v35: varmistetaan ettei track koskaan peitä tekstejä
         // alustava zoom-ikkuna = koko alue
         zoomWin.attr("x", 2).attr("width", cfg.zoomBar.width - 4).attr("y", 0).attr("height", innerH - 1); // synkassa taustan kanssa
+        relayoutPresentOverlay(); // keep the snapshot line in the right place after layout
     }
 
     function layoutCenterOverlay() {
@@ -332,6 +373,47 @@ let __isRendering = false;
             state.themeColors.set(t, cfg.palette[idx]);
         }
         return state.themeColors.get(t);
+    }
+    // Initialize the present overlay once (create content & set static label).
+    function initPresentOverlay() {
+        try {
+            presentText.text(getSnapshotLabel());
+        } catch (_) { }
+    }
+
+    // Reposition the overlay on any viewport change (zoom/pan/resize).
+    function relayoutPresentOverlay() {
+        if (!state || !state.y) return;
+
+        // Compute Y from the current scale using a tiny positive age (avoids log(0)).
+        const ageYears = getSnapshotAgeYears();
+        let yPx = NaN;
+        try {
+            yPx = state.y(ageYears);
+        } catch (_) {
+            // In case scale not ready yet
+            return;
+        }
+
+        // match the content lane width used by cards (gRoot local coords)
+        const xLeft = 0;
+        const xRight = Math.max(0, innerWidth()); // same width used for cards/layout
+
+        presentLine
+            .attr("x1", xLeft)
+            .attr("x2", xRight)
+            .attr("y1", yPx)
+            .attr("y2", yPx);
+
+        // Keep label slightly to the right; clamp to viewport.
+        const labelOffsetX = 12;
+        const labelOffsetY = -4;
+        const tx = Math.max(4, Math.min(xRight - 4, xLeft + labelOffsetX));
+        const ty = Math.max(10, Math.min((state.height || 99999) - 6, yPx + labelOffsetY));
+
+        presentText
+            .attr("x", tx)
+            .attr("y", ty);
     }
 
     function drawAxis() {
@@ -550,7 +632,7 @@ let __isRendering = false;
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
             markPrefocusClass();
-
+            relayoutPresentOverlay(); // keep the snapshot line synced with current pan/zoom
             setZOrder();
         } finally {
             __isRendering = false;
@@ -648,6 +730,26 @@ let __isRendering = false;
 
     // --- init ---
     async function init() {
+        // --- Observer snapshot (v45) ---
+        // v45: we only capture a snapshot; we don't animate yet.
+        const OBSERVER_SNAPSHOT_DATE = (window.TimeEngine && window.TimeEngine.getObserverNow())
+            || new Date();
+
+        const OBSERVER_SNAPSHOT_DECIMAL = (window.TimeEngine && window.TimeEngine.getObserverNowDecimalYear)
+            ? window.TimeEngine.getObserverNowDecimalYear()
+            : (function () { // fallback local decimal-year if TimeEngine isn't present
+                const d = OBSERVER_SNAPSHOT_DATE;
+                const y = d.getFullYear();
+                const start = new Date(y, 0, 1);
+                const ms = d - start;
+                const day = ms / 86400000;
+                const daysInYear = ((y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0)) ? 366 : 365;
+                return y + (day / daysInYear);
+            })();
+
+        console.log('[time:snapshot] Observer snapshot (Date):', OBSERVER_SNAPSHOT_DATE);
+        console.log('[time:snapshot] Observer snapshot (decimal year):', OBSERVER_SNAPSHOT_DECIMAL);
+
         // v38: mittaa H1 + margin-bottom → CSS --header-h
         const h1 = document.getElementById('page-title');
         let h1H = 0;
@@ -718,6 +820,8 @@ let __isRendering = false;
         // päivitä skaalat domainin mukaan
         state.yBase.domain([state.minYears, state.maxYears]);
         state.y.domain([state.minYears, state.maxYears]);
+        initPresentOverlay();
+        relayoutPresentOverlay();
         applyZoom();
         setZOrder();                 // heti ensimmäisen piirron jälkeen
         requestAnimationFrame(setZOrder); // varmuus: myös seuraavassa framessa

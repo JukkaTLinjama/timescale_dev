@@ -18,6 +18,12 @@ This version consolidates three architectural pieces:
    A lightweight, non-interactive visual layer that displays the current clock region and, later, a live feed of near-real-time events.
 
 ---
+<p align="center">
+  <img src="./present_overlay_demo.png" alt="Present overlay region — modern technology segment" width="350">
+  <br>
+  <em>Figure 1 — Present overlay region near the wall-clock end of the timeline.  
+  The user scrolls down to reach this area, where seconds, minutes, and recent events unfold.</em>
+</p>
 
 ## 2. Data model
 

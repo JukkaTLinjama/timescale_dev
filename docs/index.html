@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v44.1</title>
+        <title>History Timeline v45</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v44.1</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -193,6 +193,77 @@
 
         // Global timing delays for UI interactions (ms)
         window.TS_DELAY = { ACTIVATE: 1000, ZOOM: 1500 };
+    </script>
+    <script>
+        // --- Observer Time config (v45) ---
+        // Keep TS_CFG global; extend with a 'view' section.
+        window.TS_CFG = window.TS_CFG || {};
+        TS_CFG.view = {
+            // 'system' = use the user's local system clock
+            // 'fixed'  = lock to a specific date/time (for simulation/testing)
+            // 'play'   = reserved for future timeline playback
+            mode: 'system',
+            fixedDate: null,         // e.g., '2030-01-01T00:00:00'
+            granularity: '1s'        // publishing cadence; v45 uses snapshot only
+        };
+
+        // Optional: URL override for quick simulation:
+        // ?view=2030-01-01T00:00:00  OR  ?view=2030
+        (function applyViewFromURL() {
+            try {
+                const q = new URLSearchParams(location.search);
+                const v = q.get('view');
+                if (!v) return;
+                // If only a year is provided, expand to Jan 1 local midnight.
+                const iso = /^\d{4}$/.test(v) ? `${v}-01-01T00:00:00` : v;
+                TS_CFG.view.mode = 'fixed';
+                TS_CFG.view.fixedDate = iso;
+                console.log('[time:view] Fixed observer time from URL:', iso);
+            } catch (e) {
+                console.warn('[time:view] URL parse failed:', e);
+            }
+        })();
+
+        // --- TimeEngine (single source of truth for "now") ---
+        // Everyone else should call TimeEngine.getObserverNow() instead of Date.now().
+        (function () {
+            // Convert local Date -> decimal year (CE positive, BCE negative not expected here).
+            function toDecimalYearLocal(date) {
+                const y = date.getFullYear();
+                const start = new Date(y, 0, 1, 0, 0, 0, 0);      // local Jan 1
+                const ms = date - start;                           // ms since local Jan 1
+                const day = ms / 86400000;                         // days since Jan 1
+                const daysInYear = ((y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0)) ? 366 : 365;
+                return y + (day / daysInYear);
+            }
+
+            // Return the current "observer time" as a Date.
+            // v45: snapshot only; later this may tick by granularity or play rate.
+            function getObserverNow() {
+                const v = window.TS_CFG?.view || {};
+                if (v.mode === 'fixed' && v.fixedDate) {
+                    // Interpret as local time on purpose (UX: matches the viewer's clock)
+                    return new Date(v.fixedDate);
+                }
+                // System mode: read the local system clock
+                return new Date();
+            }
+
+            // Helper for consumers that want decimal-year directly.
+            function getObserverNowDecimalYear() {
+                return toDecimalYearLocal(getObserverNow());
+            }
+
+            // Expose a minimal API.
+            window.TimeEngine = {
+                getObserverNow,
+                getObserverNowDecimalYear,
+                toDecimalYearLocal
+            };
+
+            console.log('[time:init] TimeEngine ready. Mode:', TS_CFG.view.mode,
+                'FixedDate:', TS_CFG.view.fixedDate || '(none)');
+        })();
     </script>
 
     <script>

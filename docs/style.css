@@ -595,3 +595,20 @@ text.event-label {
         transition: none;
     }
 }
+/* --- Present Overlay (v45) --- */
+.present-overlay .present-line {
+    stroke: var(--present-stroke, #00bcd4);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+    /* stays thin at any zoom */
+    opacity: 0.9;
+}
+
+.present-overlay .present-label {
+    font-size: 11px;
+    fill: var(--present-text, #00bcd4);
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.25),
+        0 -1px 0 rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
