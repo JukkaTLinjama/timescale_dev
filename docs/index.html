@@ -577,6 +577,107 @@
         window.DataUtil = { normalizeData };
     })();
 </script>
+<script>
+    /* ----------------------------------------------------------
+       v45.1 — Data preparation and absolute "present" events
+       ----------------------------------------------------------
+       This script moves data loading from timeline.js to index.html.
+       It:
+       1. Fetches eventsDB.json and metadata.
+       2. Normalizes via DataUtil.normalizeData (already loaded).
+       3. Anchors "present" events to the real wall clock time.
+       4. Exposes the combined data as window.TS_DATA for timeline.js.
+       ---------------------------------------------------------- */
+
+    (function () {
+        /* --- Time utilities (candidates for utils/timeUtils.js) --- */
+        const YEAR_MS = 365.2425 * 24 * 3600 * 1000;
+        const yearsBetween = (a, b) => Math.abs(b - a) / YEAR_MS;
+
+        const floorToSecond = d => (d = new Date(d), d.setMilliseconds(0), d);
+        const floorToMinute = d => (d = new Date(d), d.setSeconds(0, 0), d);
+        const floorToHour = d => (d = new Date(d), d.setMinutes(0, 0, 0), d);
+        const floorToDay = d => (d = new Date(d), d.setHours(0, 0, 0, 0), d);
+
+        /* --- Generate absolute-time “present” events --- */
+        function buildPresent(now) {
+            const items = [
+                // These represent the live "present moment" anchors
+                { id: 'present-last-second', label: 'last second', theme: 'present', t: new Date(floorToSecond(now).getTime() - 1000) },
+                { id: 'present-minute', label: 'this minute', theme: 'present', t: floorToMinute(now) },
+                { id: 'present-hour', label: 'this hour', theme: 'present', t: floorToHour(now) },
+                { id: 'present-day', label: 'today', theme: 'present', t: floorToDay(now) }
+            ];
+
+            // Convert timestamps to numeric year and relative position
+            return items.map(e => ({
+                ...e,
+                year: e.t.getFullYear(),
+                time_years: yearsBetween(e.t, now)
+            }));
+        }
+
+        /* --- Main async preparation (candidate: dataLoader.prepare()) --- */
+        async function prepare() {
+            try {
+                const res = await fetch('eventsDB.json', { cache: 'no-store' });
+                const json = await res.json();
+
+                // Keep metadata globally available
+                window.__EVENTS_META__ = json.metadata || {};
+
+                // Use fixed reference time if provided by metadata
+                const nowRef = (window.__EVENTS_META__?.time_spec?.now_iso)
+                    ? new Date(window.__EVENTS_META__.time_spec.now_iso)
+                    : new Date();
+
+                // Normalize events and themes using existing utility
+                const { events, themes, themeColors } = window.DataUtil.normalizeData(json);
+
+                // Add real-time anchored "present" markers
+                const present = buildPresent(nowRef);
+
+                // Merge old + new
+                const merged = events.concat(present);
+                const outThemes = Array.from(new Set([...(themes || []), 'present']));
+                const outThemeColors = Object.assign({}, themeColors || {}, { present: '#ff8c42' });
+
+
+                /* --- Sanitize: ensure every event has a finite, positive time_years --- */
+                const sanitized = merged.map(ev => {
+                    let ty = Number(ev.time_years);
+
+                    // If missing/invalid, rebuild from year/log; fall back to tiny positive
+                    if (!Number.isFinite(ty) || ty <= 0) {
+                        if (typeof ev.year === "number") {
+                            // difference in years vs. nowRef
+                            const nowY = nowRef.getFullYear();
+                            ty = Math.max(1e-8, Math.abs(nowY - ev.year));
+                        } else if (typeof ev.log === "number") {
+                            ty = Math.max(1e-8, Math.pow(10, ev.log));
+                        } else {
+                            ty = 1e-8; // last resort to keep log-scale happy
+                        }
+                    }
+
+                    return { ...ev, time_years: ty };
+                });
+
+                /* --- END sanitize block --- */
+
+                // Expose final result for timeline.js
+                window.TS_DATA = { events: sanitized, themes: outThemes, themeColors: outThemeColors };
+                console.info('[v45.1] TS_DATA prepared:', window.TS_DATA);
+
+            } catch (e) {
+                console.warn('[v45.1] prepare() failed, fallback to timeline.js loader:', e);
+                window.TS_DATA = null;
+            }
+        }
+        // Promise allows timeline.js to wait if needed
+        window.TS_DATA_P = prepare();
+    })();
+</script>
 
     <script src="timeline.js"></script>
     

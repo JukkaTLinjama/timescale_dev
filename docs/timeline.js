@@ -58,7 +58,7 @@ let __isRendering = false;
     // v37: clip korttialueelle
     const defs = svg.append("defs");
     const plotClip = defs.append("clipPath").attr("id", "plotClip");
-    const plotClipRect = plotClip.append("rect"); // mitat asetetaan layoutissa
+    const plotClipRect = plotClip.append("rect").attr("id", "plotClipRect"); // set id for later getBBox()
     // käytä klippausta vain korteille (akseli ja zoom jäävät vapaiksi)
     gCards.attr("clip-path", "url(#plotClip)");
 
@@ -314,16 +314,21 @@ let __isRendering = false;
 
     // v36: domain datasta + pieni marginaali ylä- ja alapäähän (log-dekadeina)
     function computeDomainFromData() {
-        if (!state.events.length) return;
+        // Gather clean values (use your ty() helper if lisäsit sen)
+        const vals = state.events
+            .map(e => +e.time_years)
+            .filter(v => Number.isFinite(v) && v > 0);
 
-        const minData = d3.min(state.events, d => Math.max(+d.time_years || 1e-8, 1e-8));
-        const maxData = d3.max(state.events, d => +d.time_years || 1);
+        // Safe defaults if something odd happens
+        const minData = vals.length ? Math.min(...vals) : 1e-3;
+        const maxData = vals.length ? Math.max(...vals) : 1e9;
 
-        const padTopDec = 0.15;     // ~0.15 dekadia "ylätilaa" → minYears = minData / 10^0.15 (~/1.41)
-        const padBotDec = 0.45;     // kevyt alapään marginaali (valinnainen)
+        const padTopDec = 0.15;
+        const padBotDec = 0.45;
 
-        state.minYears = Math.max(1e-1, minData / Math.pow(10, padTopDec));   // pienempi arvo = enemmän tilaa ylös
-        state.maxYears = Math.max(10, maxData * Math.pow(10, padBotDec));   // isompi arvo = hieman tilaa alas
+        // Allow sub-year domain (seconds/minutes/hours/day)
+        state.minYears = Math.max(1e-8, minData / Math.pow(10, padTopDec));
+        state.maxYears = Math.max(10, maxData * Math.pow(10, padBotDec));
     }
 
     function colorForTheme(t) {
@@ -713,14 +718,31 @@ let __isRendering = false;
 
         svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
 
-        // lataa & piirrä
-        await loadData();
-        // päivitä skaalat domainin mukaan
+        // load & render (v45.1: prefer prebuilt TS_DATA from index.html)
+        if (window.TS_DATA_P && typeof window.TS_DATA_P.then === "function") {
+            try { await window.TS_DATA_P; } catch (_) { }
+        }
+        if (window.TS_DATA && Array.isArray(window.TS_DATA.events)) {
+            const { events, themes, themeColors } = window.TS_DATA;
+            state.events = events;
+            state.themes = themes || Array.from(new Set(events.map(e => e.theme)));
+            if (themeColors) {
+                Object.entries(themeColors).forEach(([t, c]) => state.themeColors.set(t, c));
+            } else {
+                state.themes.forEach(t => colorForTheme(t));
+            }
+            computeDomainFromData(); // recompute with combined data (includes “present”)
+        } else {
+            await loadData(); // fallback to legacy loader
+        }
+
+        // update scales from computed domain
         state.yBase.domain([state.minYears, state.maxYears]);
         state.y.domain([state.minYears, state.maxYears]);
+
         applyZoom();
-        setZOrder();                 // heti ensimmäisen piirron jälkeen
-        requestAnimationFrame(setZOrder); // varmuus: myös seuraavassa framessa
+        setZOrder();
+        requestAnimationFrame(setZOrder);
 
         // v41 API: expose minimal controls for external (index.html) animation
         window.TimelineAPI = {
