@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.1</title>
+        <title>History Timeline v45.2</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.1</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.2</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -599,50 +599,73 @@
         const floorToHour = d => (d = new Date(d), d.setMinutes(0, 0, 0), d);
         const floorToDay = d => (d = new Date(d), d.setHours(0, 0, 0, 0), d);
 
-        /* --- Build "this …" anchors straight from system clock (no floor helpers) --- */
+       /* --- Build present anchors (stable header + 4-second trail) --- */
         function buildPresent() {
-            const now = new Date(); // system clock (local time)
+            const now = new Date(); // local system clock
 
-            // quick formatters
+            // format helpers
             const pad = n => String(n).padStart(2, "0");
-            const HH = pad(now.getHours());
-            const mm = pad(now.getMinutes());
-            const ss = pad(now.getSeconds());
-            const yyyy = now.getFullYear();
-            const MM = pad(now.getMonth() + 1);
-            const dd = pad(now.getDate());
+            const toClock = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            const toClockSec = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            const toDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            const toMonth = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+            const toYear = d => `${d.getFullYear()}`;
 
-            // labels taken directly from system clock
-            const labelSec = `${HH}:${mm}:${ss} (this sec)`;
-            const labelMin = `${HH}:${mm} (this min)`;
-            const labelHour = `${HH}:00 (this hour)`;          // hour start
-            const labelDay = `${yyyy}-${MM}-${dd} (this day)`;// day start
-            const labelMonth = `${yyyy}-${MM} (this month)`;    // month start
-            const labelYear = `${yyyy} (this year)`;           // year start
+            // “starts of” current periods
+            const secStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+                now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+            const minStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+                now.getHours(), now.getMinutes(), 0, 0);
+            const hourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+                now.getHours(), 0, 0, 0);
+            const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+            const yearStart = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
 
-            // anchors: starts of the current periods, built directly with Date(y,M,d,h,m,s)
-            const tSec = new Date(yyyy, now.getMonth(), dd, now.getHours(), now.getMinutes(), now.getSeconds()); // ~now (sec precision)
-            const tMin = new Date(yyyy, now.getMonth(), dd, now.getHours(), now.getMinutes(), 0);
-            const tHour = new Date(yyyy, now.getMonth(), dd, now.getHours(), 0, 0);
-            const tDay = new Date(yyyy, now.getMonth(), dd, 0, 0, 0);
-            const tMonth = new Date(yyyy, now.getMonth(), 1, 0, 0, 0);
-            const tYear = new Date(yyyy, 0, 1, 0, 0, 0);
+            // 0) STABLE HEADER ANCHOR ~0.1 s from now → keeps card top steady
+            const anchor = {
+                id: 'present-header-anchor',
+                label: '',                // no visible text
+                theme: 'present',
+                t: new Date(now.getTime() - 10), // ~0.1 s before now
+                isAnchor: true            // we’ll hide it in drawing
+            };
 
-            const items = [
-                { id: 'present-this-sec', label: labelSec, theme: 'present', t: tSec },
-                { id: 'present-this-min', label: labelMin, theme: 'present', t: tMin },
-                { id: 'present-this-hour', label: labelHour, theme: 'present', t: tHour },
-                { id: 'present-this-day', label: labelDay, theme: 'present', t: tDay },
-                { id: 'present-this-month', label: labelMonth, theme: 'present', t: tMonth },
-                { id: 'present-this-year', label: labelYear, theme: 'present', t: tYear },
+            // 1) “this …” anchors
+            const main = [
+                { id: 'present-this-sec', label: `${toClockSec(now)} (this sec)`, theme: 'present', t: secStart },
+                { id: 'present-this-min', label: `${toClock(minStart)} (this min)`, theme: 'present', t: minStart },
+                { id: 'present-this-hour', label: `${toClock(hourStart)} (this hour)`, theme: 'present', t: hourStart },
+                { id: 'present-this-day', label: `${toDate(dayStart)} (this day)`, theme: 'present', t: dayStart },
+                { id: 'present-this-month', label: `${toMonth(monthStart)} (this month)`, theme: 'present', t: monthStart },
+                { id: 'present-this-year', label: `${toYear(yearStart)} (this year)`, theme: 'present', t: yearStart }
             ];
 
-            return items.map(e => ({
+            // 2) TRAIL: show 4 previous seconds as a continuum
+            const trail = [];
+            for (let k = 1; k <= 4; k++) {
+                const t = new Date(secStart.getTime() - k * 1000);
+                trail.push({
+                    id: `present-sec-trail-${k}`,
+                    label: toClockSec(t),    // just time; no “last …” text
+                    theme: 'present',
+                    t
+                });
+            }
+
+            // map all to render fields
+            const items = [anchor, ...main, ...trail].map(e => ({
                 ...e,
-                year: e.t.getFullYear(),               // ei näytetä present-teemalle
-                time_years: yearsBetween(e.t, now)     // käytetään renderöintiin
+                year: e.t.getFullYear(),                 // not shown for present in draw
+                time_years: yearsBetween(e.t, now)
             }));
+
+            // sort by age ascending: this sec, this min, ..., trail seconds (older lower)
+            return items.sort((a, b) => a.time_years - b.time_years);
         }
+
+        // expose for realtime updater
+        window.buildPresent = buildPresent;
 
         /* --- Main async preparation (candidate: dataLoader.prepare()) --- */
         async function prepare() {
@@ -696,12 +719,72 @@
                 console.info('[v45.1] TS_DATA prepared:', window.TS_DATA);
 
             } catch (e) {
-                console.warn('[v45.1] prepare() failed, fallback to timeline.js loader:', e);
-                window.TS_DATA = null;
+                console.warn('[v45.1] prepare() failed, using INDEX fallback:', e);
+
+                // --- Present-only fallback built from the system clock ---
+                // Uses your buildPresent() which produces: this sec/min/hour/day/month/year
+                const present = buildPresent().sort((a, b) => a.time_years - b.time_years);
+
+                // Minimal theme set for fallback
+                const fallbackThemes = ['present'];
+                const fallbackThemeColors = { present: '#ff8c42' };
+
+                // Sanitize just in case (should already be fine, but belt-and-suspenders)
+                const now = new Date();
+                const sanitized = present.map(ev => {
+                    let ty = Number(ev.time_years);
+                    if (!Number.isFinite(ty) || ty <= 0) {
+                        // Recompute from label timestamp if ever needed; here we can just force tiny positive
+                        ty = 1e-8;
+                    }
+                    return { ...ev, time_years: ty };
+                });
+
+                // Expose fallback dataset for timeline.js
+                window.TS_DATA = {
+                    events: sanitized,
+                    themes: fallbackThemes,
+                    themeColors: fallbackThemeColors
+                };
+
+                console.info('[v45.1] INDEX fallback active (present-only).');
             }
         }
         // Promise allows timeline.js to wait if needed
         window.TS_DATA_P = prepare();
+    })();
+</script>
+<script>
+    /* --- v45.3 realtime updater for present anchors --- */
+    (function setupPresentUpdater() {
+        const UPDATE_INTERVAL_MS = 50; // one/3 second
+
+        function updatePresentData() {
+            // 1. Rebuild present anchors from current system clock
+           if (typeof window.buildPresent !== 'function') return; // guard
+            const updated = window.buildPresent().sort((a, b) => a.time_years - b.time_years);
+
+            // 2. Replace old present events in TS_DATA
+            if (window.TS_DATA && Array.isArray(window.TS_DATA.events)) {
+                // remove previous present items
+                const others = window.TS_DATA.events.filter(ev => ev.theme !== 'present');
+                window.TS_DATA.events = others.concat(updated);
+            } else {
+                window.TS_DATA = { events: updated, themes: ['present'], themeColors: { present: '#ff8c42' } };
+            }
+            // 3. Trigger redraw if the timeline is ready
+            if (typeof window.updateTimeline === 'function') window.updateTimeline();
+
+            // 3. (optional) log every 10th update for debug
+            if (!window.__updateCounter) window.__updateCounter = 0;
+            if (++window.__updateCounter % 10 === 0) {
+                console.debug(`[v45.3] present updated ${window.__updateCounter}×`, updated[0].label);
+            }
+        }
+
+        // 4. Run immediately once and then every second
+        updatePresentData();
+        setInterval(updatePresentData, UPDATE_INTERVAL_MS);
     })();
 </script>
 

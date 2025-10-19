@@ -1,4 +1,4 @@
-// timeline.js — v45.1 2024-06-19
+// timeline.js — v45.2 2024-06-19
 // using new metadata format in evetnsDB.json with relative time to present
 // v44 refactoring functions to index.html scripts
 
@@ -605,52 +605,6 @@ let __isRendering = false;
             applyZoom();
         })
 
-    // --- data ---
-    async function loadData() {
-        try {
-            const res = await fetch('eventsDB.json', { cache: "no-store" });
-            if (!res.ok) throw new Error("eventsDB.json not found");
-            const data = await res.json();
-
-            // --- normalize via DataUtil ---
-            const meta = data.metadata || {};
-            const lang = meta.locale_default || "fi";
-
-            const { events, themes, themeColors } = DataUtil.normalizeData(data, lang);
-            state.events = events;
-            state.themes = themes;
-
-            // assign colors (prefer metadata)
-            state.themes.forEach(t => {
-                if (themeColors && themeColors[t]) {
-                    state.themeColors.set(t, themeColors[t]);
-                } else {
-                    colorForTheme(t);
-                }
-            });
-            
-            computeDomainFromData();
-            const sm = document.getElementById("status-message");
-            if (sm) sm.textContent = "✅ Data loaded from eventsDB.json.";
-        } catch (e) {
-            console.warn("Using fallback data:", e.message);
-            const sm = document.getElementById("status-message");
-            if (sm) sm.textContent = "⚠️ eventsDB.json not found — using demo data.";
-
-            state.events = [
-                { label: "Alkuräjähdys", year: "13.8e9", time_years: 13.8e9, theme: "kosmos" },
-                { label: "Elämän synty", year: "3.8e9", time_years: 3.8e9, theme: "elämä" },
-                { label: "Dinosaurukset kuolevat", year: "6.6e7", time_years: 6.6e7, theme: "elämä" },
-                { label: "Homo sapiens", year: "3.0e5", time_years: 3.0e5, theme: "ihmiskunta" },
-                { label: "Antiikin Kreikka", year: "2.5e3", time_years: 2.5e3, theme: "kulttuuri" },
-                { label: "Moderni tiede", year: "4.0e2", time_years: 4.0e2, theme: "teknologia" }
-            ];
-            state.themes = Array.from(new Set(state.events.map(e => e.theme)));
-            state.themes.forEach(t => colorForTheme(t));
-            computeDomainFromData();
-        }
-    }
-
     // --- init ---
     async function init() {
         // v38: mittaa H1 + margin-bottom → CSS --header-h
@@ -718,11 +672,16 @@ let __isRendering = false;
 
         svg.on("dblclick.zoom", null); // v40.3: disable built-in double-click zoom
 
-        // load & render (v45.1: prefer prebuilt TS_DATA from index.html)
+        // load & render (v45.2: TS_DATA prepared in index.html)
         if (window.TS_DATA_P && typeof window.TS_DATA_P.then === "function") {
-            try { await window.TS_DATA_P; } catch (_) { }
+            try { await window.TS_DATA_P; } catch (e) {
+                console.error("[v45.2] TS_DATA_P failed:", e);
+            }
         }
-        if (window.TS_DATA && Array.isArray(window.TS_DATA.events)) {
+        if (!(window.TS_DATA && Array.isArray(window.TS_DATA.events))) {
+            throw new Error("[v45.2] No TS_DATA available. Ensure index.html prepares TS_DATA before timeline.js.");
+        }
+        {
             const { events, themes, themeColors } = window.TS_DATA;
             state.events = events;
             state.themes = themes || Array.from(new Set(events.map(e => e.theme)));
@@ -731,9 +690,7 @@ let __isRendering = false;
             } else {
                 state.themes.forEach(t => colorForTheme(t));
             }
-            computeDomainFromData(); // recompute with combined data (includes “present”)
-        } else {
-            await loadData(); // fallback to legacy loader
+            computeDomainFromData();
         }
 
         // update scales from computed domain
@@ -775,6 +732,30 @@ let __isRendering = false;
                     y: Math.round(r.top + r.height * 0.50)
                 };
             }
+        };
+
+        // --- Live refresh hook: re-read TS_DATA and redraw without changing zoom or domain
+        window.updateTimeline = function () {
+            if (!(window.TS_DATA && Array.isArray(window.TS_DATA.events))) return;
+
+            // 0) cache current zoom transform
+            const t = d3.zoomTransform(svg.node());
+
+            // 1) sync data from TS_DATA (present anchors changed)
+            state.events = window.TS_DATA.events;
+            state.themes = window.TS_DATA.themes || Array.from(new Set(state.events.map(e => e.theme)));
+            if (window.TS_DATA.themeColors) {
+                Object.entries(window.TS_DATA.themeColors).forEach(([th, col]) => state.themeColors.set(th, col));
+            }
+
+            // 2) DO NOT recomputeDomain or touch scale domains here (prevents jump)
+            //    --> keep the current domain + transform
+
+            // 3) redraw using the cached transform
+            updateZoomIndicator(t);
+            svg.call(zoomBehavior.transform, t);  // re-apply same transform
+            applyZoom();                           // re-render at current transform
+            setZOrder();
         };
 
         // notify page scripts that timeline is ready for scripted animation
