@@ -599,21 +599,48 @@
         const floorToHour = d => (d = new Date(d), d.setMinutes(0, 0, 0), d);
         const floorToDay = d => (d = new Date(d), d.setHours(0, 0, 0, 0), d);
 
-        /* --- Generate absolute-time “present” events --- */
-        function buildPresent(now) {
+        /* --- Build "this …" anchors straight from system clock (no floor helpers) --- */
+        function buildPresent() {
+            const now = new Date(); // system clock (local time)
+
+            // quick formatters
+            const pad = n => String(n).padStart(2, "0");
+            const HH = pad(now.getHours());
+            const mm = pad(now.getMinutes());
+            const ss = pad(now.getSeconds());
+            const yyyy = now.getFullYear();
+            const MM = pad(now.getMonth() + 1);
+            const dd = pad(now.getDate());
+
+            // labels taken directly from system clock
+            const labelSec = `${HH}:${mm}:${ss} (this sec)`;
+            const labelMin = `${HH}:${mm} (this min)`;
+            const labelHour = `${HH}:00 (this hour)`;          // hour start
+            const labelDay = `${yyyy}-${MM}-${dd} (this day)`;// day start
+            const labelMonth = `${yyyy}-${MM} (this month)`;    // month start
+            const labelYear = `${yyyy} (this year)`;           // year start
+
+            // anchors: starts of the current periods, built directly with Date(y,M,d,h,m,s)
+            const tSec = new Date(yyyy, now.getMonth(), dd, now.getHours(), now.getMinutes(), now.getSeconds()); // ~now (sec precision)
+            const tMin = new Date(yyyy, now.getMonth(), dd, now.getHours(), now.getMinutes(), 0);
+            const tHour = new Date(yyyy, now.getMonth(), dd, now.getHours(), 0, 0);
+            const tDay = new Date(yyyy, now.getMonth(), dd, 0, 0, 0);
+            const tMonth = new Date(yyyy, now.getMonth(), 1, 0, 0, 0);
+            const tYear = new Date(yyyy, 0, 1, 0, 0, 0);
+
             const items = [
-                // These represent the live "present moment" anchors
-                { id: 'present-last-second', label: 'last second', theme: 'present', t: new Date(floorToSecond(now).getTime() - 1000) },
-                { id: 'present-minute', label: 'this minute', theme: 'present', t: floorToMinute(now) },
-                { id: 'present-hour', label: 'this hour', theme: 'present', t: floorToHour(now) },
-                { id: 'present-day', label: 'today', theme: 'present', t: floorToDay(now) }
+                { id: 'present-this-sec', label: labelSec, theme: 'present', t: tSec },
+                { id: 'present-this-min', label: labelMin, theme: 'present', t: tMin },
+                { id: 'present-this-hour', label: labelHour, theme: 'present', t: tHour },
+                { id: 'present-this-day', label: labelDay, theme: 'present', t: tDay },
+                { id: 'present-this-month', label: labelMonth, theme: 'present', t: tMonth },
+                { id: 'present-this-year', label: labelYear, theme: 'present', t: tYear },
             ];
 
-            // Convert timestamps to numeric year and relative position
             return items.map(e => ({
                 ...e,
-                year: e.t.getFullYear(),
-                time_years: yearsBetween(e.t, now)
+                year: e.t.getFullYear(),               // ei näytetä present-teemalle
+                time_years: yearsBetween(e.t, now)     // käytetään renderöintiin
             }));
         }
 
@@ -633,9 +660,8 @@
 
                 // Normalize events and themes using existing utility
                 const { events, themes, themeColors } = window.DataUtil.normalizeData(json);
-
-                // Add real-time anchored "present" markers
-                const present = buildPresent(nowRef);
+                // Build present quartet from system clock and keep strict chronological order
+                const present = buildPresent().sort((a, b) => a.time_years - b.time_years);
 
                 // Merge old + new
                 const merged = events.concat(present);

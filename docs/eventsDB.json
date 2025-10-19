@@ -523,46 +523,8 @@
           "author": "",
           "ref": "",
           "comments": ""
-        },
-        {
-          "label": "1 päivä sitten",
-          "year": "1 vrk",
-          "time_years": 0.0027,
-          "log": 4.94,
-          "author": "",
-          "ref": "",
-          "comments": ""
-        },
-        {
-          "label": "1 tunti sitten",
-          "year": "1 h",
-          "time_years": 0.0001,
-          "relative_time": {
-            "amount": 1,
-            "unit": "hour"
-          },
-          "i18n": {
-            "fi": {
-              "label": "1 tunti sitten"
-            },
-            "en": {
-              "label": "1 hout ago"
-            }
-          },
-          "display": {
-            "align": "auto"
-          },
-          "comments": "likiasrvo.. suhteessa nykyhetkeen"
-        },
-        {
-          "label": "1 sekunti sitten",
-          "year": "3.2e-08",
-          "time_years": 3.17e-8,
-          "log": 0,
-          "author": "",
-          "ref": "",
-          "comments": ""
         }
+
       ]
     }
   ]
