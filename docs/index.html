@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.2</title>
+        <title>History Timeline v45.3</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.2</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.3</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -591,6 +591,7 @@
 
     (function () {
         /* --- Time utilities (candidates for utils/timeUtils.js) --- */
+
         const YEAR_MS = 365.2425 * 24 * 3600 * 1000;
         const yearsBetween = (a, b) => Math.abs(b - a) / YEAR_MS;
 
@@ -691,27 +692,36 @@
                 const outThemes = Array.from(new Set([...(themes || []), 'present']));
                 const outThemeColors = Object.assign({}, themeColors || {}, { present: '#ff8c42' });
 
+                /* --- Sanitize: ensure every event has a finite, positive time_years (YEARS) --- */
+                const YEAR_MS = 365.2425 * 24 * 3600 * 1000;
+                const nowMs = nowRef.getTime();
+                // decimal “now” (year with fraction) to support calendar-year diffs without Date overflow
+                const __Y = nowRef.getFullYear();
+                const __a = new Date(__Y, 0, 1), __b = new Date(__Y + 1, 0, 1);
+                const nowDec = __Y + (nowRef - __a) / (__b - __a);
 
-                /* --- Sanitize: ensure every event has a finite, positive time_years --- */
+
                 const sanitized = merged.map(ev => {
                     let ty = Number(ev.time_years);
+                    // Recalculate if the event has a calendar year (fixes 1-year → 10⁰ bug)
+                    if (!isNaN(ev.year) && ev.year > 0) ty = NaN;  // force recompute
+                    else if (Number.isFinite(ty) && ty > 0) return ev;
 
-                    // If missing/invalid, rebuild from year/log; fall back to tiny positive
-                    if (!Number.isFinite(ty) || ty <= 0) {
-                        if (typeof ev.year === "number") {
-                            // difference in years vs. nowRef
-                            const nowY = nowRef.getFullYear();
-                            ty = Math.max(1e-8, Math.abs(nowY - ev.year));
-                        } else if (typeof ev.log === "number") {
-                            ty = Math.max(1e-8, Math.pow(10, ev.log));
-                        } else {
-                            ty = 1e-8; // last resort to keep log-scale happy
-                        }
+                    // 1) deep time given as log10(years) → trust it
+                    if (Number.isFinite(+ev.log)) {
+                        ty = Math.max(1e-9, Math.pow(10, +ev.log));
+
+                        // 2) calendar-like decimal year (human history) → use decimal difference (no Date overflow)
+                    } else if (Number.isFinite(+ev.year)) {
+                        ty = Math.max(1e-9, nowDec - (+ev.year));
+
+                        // 3) last resort
+                    } else {
+                        ty = 1e-9;
                     }
 
                     return { ...ev, time_years: ty };
                 });
-
                 /* --- END sanitize block --- */
 
                 // Expose final result for timeline.js
@@ -754,42 +764,126 @@
         window.TS_DATA_P = prepare();
     })();
 </script>
+
+    <script
+        src="timeline.js"> // ------------------------------ main rendering module  //
+    </script>
+    
 <script>
-    /* --- v45.3 realtime updater for present anchors --- */
-    (function setupPresentUpdater() {
-        const UPDATE_INTERVAL_MS = 50; // one/3 second
+    /**
+     * Present Overlay (v45.3) — 250 ms updates, aligned to g.root
+     * - Attaches under g.root so coordinates match axis/zoom exactly.
+     * - Reads major tick exponents (10^n) to map log10(time_years) → y.
+     * - No calls to init/zoom/hide → won't steal focus or close InfoBox.
+     */
 
-        function updatePresentData() {
-            // 1. Rebuild present anchors from current system clock
-           if (typeof window.buildPresent !== 'function') return; // guard
-            const updated = window.buildPresent().sort((a, b) => a.time_years - b.time_years);
+    (function () {
+        // ---- time helpers ----
+        function toDecimalYear(d) { const Y = d.getFullYear(), a = new Date(Y, 0, 1), b = new Date(Y + 1, 0, 1); return Y + (d - a) / (b - a); }
+        function floorToSecond(d) { const x = new Date(d); x.setMilliseconds(0); return x; }
+        function floorToMinute(d) { const x = new Date(d); x.setSeconds(0, 0); return x; }
+        function floorToHour(d) { const x = new Date(d); x.setMinutes(0, 0, 0); return x; }
+        function floorToDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 
-            // 2. Replace old present events in TS_DATA
-            if (window.TS_DATA && Array.isArray(window.TS_DATA.events)) {
-                // remove previous present items
-                const others = window.TS_DATA.events.filter(ev => ev.theme !== 'present');
-                window.TS_DATA.events = others.concat(updated);
-            } else {
-                window.TS_DATA = { events: updated, themes: ['present'], themeColors: { present: '#ff8c42' } };
-            }
-            // 3. Trigger redraw if the timeline is ready
-            if (typeof window.updateTimeline === 'function') window.updateTimeline();
-
-            // 3. (optional) log every 10th update for debug
-            if (!window.__updateCounter) window.__updateCounter = 0;
-            if (++window.__updateCounter % 10 === 0) {
-                console.debug(`[v45.3] present updated ${window.__updateCounter}×`, updated[0].label);
-            }
+        function buildPresent(now = new Date()) {
+            const it = [
+                { id: 'present-sec', label: 'this second', date: floorToSecond(now) },   // start of this second
+                { id: 'present-min', label: 'this minute', date: floorToMinute(now) },   // start of this minute
+                { id: 'present-hr', label: 'this hour', date: floorToHour(now) },
+                { id: 'present-day', label: 'today', date: floorToDay(now) }
+            ].map(e => ({ ...e, decYear: toDecimalYear(e.date) }));
+            const MSY = 365.2425 * 24 * 3600 * 1000, nowMs = now.getTime();
+            return it.map(e => ({
+                ...e,
+                yearLabel: e.decYear.toFixed(6),
+                // age since the start of the current bin → small near "now" (top)
+                time_years: Math.max(1e-10, (nowMs - e.date.getTime()) / MSY)
+            }));
         }
 
-        // 4. Run immediately once and then every second
-        updatePresentData();
-        setInterval(updatePresentData, UPDATE_INTERVAL_MS);
+        // ---- map log10(time_years) → y, using ticks INSIDE g.root ----
+        function getAxisMapping() {
+            const ticks = [...document.querySelectorAll('#timeline g.root g.axis g.tick')];
+            const pts = [];
+            for (const t of ticks) {
+                const sup = t.querySelector('tspan:nth-of-type(2)');
+                const exp = sup ? parseFloat(sup.textContent) : NaN;
+                const tr = t.getAttribute('transform') || '';
+                const m = tr.match(/translate\([^,]+,([^)]+)\)/);
+                if (Number.isFinite(exp) && m) pts.push({ exp, y: +m[1] }); // y in g.root coords
+            }
+            if (pts.length < 2) return null;
+            const n = pts.length, sx = pts.reduce((s, p) => s + p.exp, 0), sy = pts.reduce((s, p) => s + p.y, 0),
+                sxx = pts.reduce((s, p) => s + p.exp * p.exp, 0), sxy = pts.reduce((s, p) => s + p.exp * p.y, 0),
+                a = (n * sxy - sx * sy) / (n * sxx - sx * sx), b = (sy - a * sx) / n;
+            return v => a * Math.log10(Math.max(1e-12, v)) + b; // y in g.root coords
+        }
+
+        // ---- geometry in g.root coords (axis & zoomBar live here) ----
+        function axisRight() {
+            const axis = document.querySelector('#timeline g.root g.axis');
+            if (!axis) return 14;
+            try { const r = axis.getBBox(); return r.x + r.width; } catch { return 14; }
+        }
+        function zoomLeft() {
+            const z = document.querySelector('#timeline g.root g.zoomBar .track')
+                || document.querySelector('#timeline g.root g.zoomBar');
+            if (!z) return 320;
+            try { return z.getBBox().x; } catch { return 320; }
+        }
+
+        // ---- ensure overlay UNDER g.root (inherits transform automatically) ----
+        function ensureOverlay() {
+            const root = d3.select('#timeline').select('g.root');
+            let g = root.select('#present-overlay');
+            if (g.empty()) {
+                g = root.append('g')
+                    .attr('id', 'present-overlay')
+                    .style('pointer-events', 'none'); // never steals input
+            }
+            return g;
+        }
+
+        function render(items) {
+            const mapY = getAxisMapping(); if (!mapY) return;
+            const x0 = axisRight() + 6, x1 = zoomLeft() - 18, xText = x0 + 10; // all in g.root coords
+            const g = ensureOverlay();
+
+            const sel = g.selectAll('g.present-item').data(items, d => d.id);
+            const ent = sel.enter().append('g').attr('class', 'present-item').style('opacity', 0);
+
+            ent.append('line')
+                .attr('x1', x0).attr('x2', x1).attr('y1', 0).attr('y2', 0)
+                .attr('stroke', '#ff8c42').attr('stroke-width', 2)
+                .attr('stroke-opacity', 0.9).attr('stroke-dasharray', '2 3');
+
+            ent.append('text')
+                .attr('x', xText).attr('y', 0).attr('dy', '0.32em')
+                .attr('font-size', 10).attr('fill', '#ffd399')
+                .attr('stroke', 'rgba(0,0,0,0.35)').attr('stroke-width', 0.6);
+
+            ent.transition().duration(100).style('opacity', 1);
+
+            sel.merge(ent).each(function (d) {
+                const y = mapY(d.time_years);
+                d3.select(this).select('line').attr('x1', x0).attr('x2', x1).attr('y1', y).attr('y2', y);
+                d3.select(this).select('text').attr('x', xText).attr('y', y).text(`${d.label} (${d.yearLabel})`);
+            });
+
+            sel.exit().transition().duration(80).style('opacity', 0).remove();
+        }
+
+        document.addEventListener('timeline:ready', () => {
+            const tick = () => render(buildPresent(new Date()));
+            tick();
+            if (window.__presentTimer) clearInterval(window.__presentTimer);
+            // UPDATE RATE: 250 ms
+            window.__presentTimer = setInterval(tick, 250);
+            window.addEventListener('resize', tick, { passive: true });
+        });
     })();
 </script>
 
-    <script src="timeline.js"></script>
-    
     <script>     // Startup animation: ---------------------------------------------------------------------------
         const nav = performance.getEntriesByType('navigation')[0];
             if (nav && nav.type === 'reload') {

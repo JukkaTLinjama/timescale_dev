@@ -1,4 +1,4 @@
-// timeline.js — v45.2 2024-06-19
+// timeline.js — v45.3 2024-06-20
 // using new metadata format in evetnsDB.json with relative time to present
 // v44 refactoring functions to index.html scripts
 
