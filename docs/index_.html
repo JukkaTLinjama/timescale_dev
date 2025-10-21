@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.3</title>
+        <title>History Timeline v45.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.3</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.5</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -667,99 +667,95 @@
 
         // expose for realtime updater
         window.buildPresent = buildPresent;
+        const THEME_ORDER_5 = ["kosmos", "biologia", "ihmiskunta", "historia", "moderni teknologia"];
 
-        /* --- Main async preparation (candidate: dataLoader.prepare()) --- */
+        function decimalYearFromDate(d) {
+            const Y = d.getFullYear();
+            const a = new Date(Y, 0, 1), b = new Date(Y + 1, 0, 1);
+            return Y + (d - a) / (b - a);
+        }
+        function ageYearsFromISODate(iso, nowMs) {
+            const t = Date.parse(iso);
+            if (!Number.isFinite(t)) return NaN;
+            return (nowMs - t) / (365.2425 * 24 * 3600 * 1000);
+        }
         async function prepare() {
             try {
-                const res = await fetch('eventsDB.json', { cache: 'no-store' });
+                // 1) Lataa uusi formaatti (meta + flat events)
+                const res = await fetch('eventsDB45.json', { cache: 'no-store' });
+                if (!res.ok) throw new Error('eventsDB45.json not found');
                 const json = await res.json();
 
-                // Keep metadata globally available
-                window.__EVENTS_META__ = json.metadata || {};
+                // 2) Lue meta + värit
+                const meta = json.meta || {};
+                const themeDefs = meta.themes || {};
 
-                // Use fixed reference time if provided by metadata
-                const nowRef = (window.__EVENTS_META__?.time_spec?.now_iso)
-                    ? new Date(window.__EVENTS_META__.time_spec.now_iso)
-                    : new Date();
+                // Rakenna themeColors metasta; fallbackit jos väri puuttuu
+                const FALLBACK = ["#6372b2", "#70a8c6", "#4b9fa8", "#368d60", "#5a9646"];
+                const themeColors = {};
+                let i = 0;
+                for (const t of Object.keys(themeDefs)) {
+                    const c = (themeDefs[t] && themeDefs[t].color) || FALLBACK[Math.min(i, FALLBACK.length - 1)];
+                    themeColors[t] = c; i++;
+                }
 
-                // Normalize events and themes using existing utility
-                const { events, themes, themeColors } = window.DataUtil.normalizeData(json);
-                // Build present quartet from system clock and keep strict chronological order
+                // 3) Teemajärjestys: ytimet ensin, sitten mahdolliset muut datassa
+                const themesInData = Array.from(new Set((json.events || []).map(e => e.theme).filter(Boolean)));
+                const themeOrder = THEME_ORDER_5.filter(t => themesInData.includes(t))
+                    .concat(themesInData.filter(t => !THEME_ORDER_5.includes(t)));
+
+                // 4) Laske time_years (ikä vuosina) uuteen skaalaan (ei DataUtil.normalizeDataa)
+                const now = new Date();
+                const nowMs = now.getTime();
+                const nowDec = decimalYearFromDate(now);
+
+                const baseEvents = (json.events || []).map(src => {
+                    let ageYears = NaN;
+                    if (typeof src.year === "number" && Number.isFinite(src.year)) {
+                        ageYears = nowDec - src.year; // desimaalivuodesta
+                    } else if (typeof src.date === "string") {
+                        const t = Date.parse(src.date);
+                        if (Number.isFinite(t)) ageYears = (nowMs - t) / (365.2425 * 24 * 3600 * 1000);
+                    }
+                    // jätä tulevaisuus pois (≤ 0)
+                    if (!Number.isFinite(ageYears) || ageYears <= 0) return null;
+
+                    return {
+                        theme: src.theme,
+                        id: src.id,
+                        label: src.label,
+                        display_label: src.label, // säilytä mahdolliselle UI-käytölle
+                        year: (typeof src.year === "number") ? src.year : undefined,
+                        date: (typeof src.date === "string") ? src.date : undefined,
+                        time_years: ageYears,
+                        author: src.author || "ChatGPT",
+                        edit_date: src.edit_date || "2025-10-20",
+                        info: src.info,
+                        ref: src.ref,
+                        language: src.language || meta.language || "fi"
+                    };
+                }).filter(Boolean)
+                    .sort((a, b) => b.time_years - a.time_years);
+
+                // 5) Present-overlayn ankkurit (käytetään jo olemassa olevaa buildPresent()ia)
                 const present = buildPresent().sort((a, b) => a.time_years - b.time_years);
 
-                // Merge old + new
-                const merged = events.concat(present);
-                const outThemes = Array.from(new Set([...(themes || []), 'present']));
-                const outThemeColors = Object.assign({}, themeColors || {}, { present: '#ff8c42' });
+                // 6) Yhdistä ja lisää present-teeman väri
+                const merged = baseEvents.concat(present);
+                const outThemes = Array.from(new Set([...themeOrder, 'present']));
+                const outThemeColors = Object.assign({ present: '#ff8c42' }, themeColors);
 
-                /* --- Sanitize: ensure every event has a finite, positive time_years (YEARS) --- */
-                const YEAR_MS = 365.2425 * 24 * 3600 * 1000;
-                const nowMs = nowRef.getTime();
-                // decimal “now” (year with fraction) to support calendar-year diffs without Date overflow
-                const __Y = nowRef.getFullYear();
-                const __a = new Date(__Y, 0, 1), __b = new Date(__Y + 1, 0, 1);
-                const nowDec = __Y + (nowRef - __a) / (__b - __a);
-
-
-                const sanitized = merged.map(ev => {
-                    let ty = Number(ev.time_years);
-                    // Recalculate if the event has a calendar year (fixes 1-year → 10⁰ bug)
-                    if (!isNaN(ev.year) && ev.year > 0) ty = NaN;  // force recompute
-                    else if (Number.isFinite(ty) && ty > 0) return ev;
-
-                    // 1) deep time given as log10(years) → trust it
-                    if (Number.isFinite(+ev.log)) {
-                        ty = Math.max(1e-9, Math.pow(10, +ev.log));
-
-                        // 2) calendar-like decimal year (human history) → use decimal difference (no Date overflow)
-                    } else if (Number.isFinite(+ev.year)) {
-                        ty = Math.max(1e-9, nowDec - (+ev.year));
-
-                        // 3) last resort
-                    } else {
-                        ty = 1e-9;
-                    }
-
-                    return { ...ev, time_years: ty };
-                });
-                /* --- END sanitize block --- */
-
-                // Expose final result for timeline.js
-                window.TS_DATA = { events: sanitized, themes: outThemes, themeColors: outThemeColors };
-                console.info('[v45.1] TS_DATA prepared:', window.TS_DATA);
+                // 7) Julkaise timeline.js:lle
+                window.TS_DATA = { meta, events: merged, themes: outThemes, themeColors: outThemeColors };
+                console.info('[v45.4] TS_DATA prepared:', window.TS_DATA);
 
             } catch (e) {
-                console.warn('[v45.1] prepare() failed, using INDEX fallback:', e);
-
-                // --- Present-only fallback built from the system clock ---
-                // Uses your buildPresent() which produces: this sec/min/hour/day/month/year
+                console.warn('[v45.4] prepare() failed, fallback to present-only:', e);
                 const present = buildPresent().sort((a, b) => a.time_years - b.time_years);
-
-                // Minimal theme set for fallback
-                const fallbackThemes = ['present'];
-                const fallbackThemeColors = { present: '#ff8c42' };
-
-                // Sanitize just in case (should already be fine, but belt-and-suspenders)
-                const now = new Date();
-                const sanitized = present.map(ev => {
-                    let ty = Number(ev.time_years);
-                    if (!Number.isFinite(ty) || ty <= 0) {
-                        // Recompute from label timestamp if ever needed; here we can just force tiny positive
-                        ty = 1e-8;
-                    }
-                    return { ...ev, time_years: ty };
-                });
-
-                // Expose fallback dataset for timeline.js
-                window.TS_DATA = {
-                    events: sanitized,
-                    themes: fallbackThemes,
-                    themeColors: fallbackThemeColors
-                };
-
-                console.info('[v45.1] INDEX fallback active (present-only).');
+                window.TS_DATA = { events: present, themes: ['present'], themeColors: { present: '#ff8c42' } };
             }
         }
+
         // Promise allows timeline.js to wait if needed
         window.TS_DATA_P = prepare();
     })();

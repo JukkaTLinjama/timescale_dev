@@ -1,5 +1,5 @@
-// timeline.js — v45.3 2024-06-20
-// using new metadata format in evetnsDB.json with relative time to present
+// timeline.js — v45.5 2024-06-21
+// v45.5 stable – data preloaded by index.html.
 // v44 refactoring functions to index.html scripts
 
 // Safe debug logger (no-op unless ?debug=1 used)
