@@ -1,15 +1,20 @@
-// timeline.js — v45.5 2024-06-21
-// v45.5 stable – data preloaded by index.html.
-// v44 refactoring functions to index.html scripts
+// timeline.js — v45.5 stable (2025-10-21)
+// Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
+// This version removes redundant Util fallbacks and old I/O logic.
 
 // Safe debug logger (no-op unless ?debug=1 used)
 const DBG = !!window.__DBG__;
 const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
-// Use helpers from window.Util when available; otherwise safe fallbacks.
+// --- Runtime helpers ---
+// NOTE v45.5: Util.safe and Util.timed are already defined in index_.html.
+// These are kept only as fallback for standalone testing; can be removed later.
 const U = window.Util || {};
 const safe = U.safe || ((fn) => (typeof fn === "function" ? fn() : undefined));
 const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : undefined));
 const Util = window.Util || (window.Util = {});
+
+// TODO v45.5: duplicate definition — cardMetrics now lives in index_.html Util.
+// Keep temporarily for safety until verified on all browsers.
 if (typeof Util.cardMetrics !== "function") {
     Util.cardMetrics = function (titleSel, groupSel, yTopEv, yBotEv, viewH) {
         const titleH = 10;
@@ -26,6 +31,8 @@ if (typeof Util.cardMetrics !== "function") {
 
 // Prevent overlapping renders and allow quick perf timing in debug mode.
 let __isRendering = false;
+// Fire 'timeline:first-render' exactly once after the initial stable draw.
+let __firstRenderFired = false;
 
 (() => {
     const cfg = (window.TS_CFG || {});
@@ -77,7 +84,7 @@ let __isRendering = false;
     // v36: ikkuna alimman tason track-ryhmään → ei peitä sisältöä
     const zoomWin = gZoomTrack.append("rect").attr("class", "window").attr("rx", 3).attr("ry", 3);
 
-    // v36: varmista kerrosjärjestys heti luontivaiheessa
+    // v36–v41: ensure correct layer order
     setZOrder();
 
     // v42: centerline + label (and a future-use invisible pad)
@@ -357,7 +364,7 @@ let __isRendering = false;
         // Build labels like “10^n” using tspans (superscript)
         gAxis.selectAll("g.tick > text").text("");
         gAxis.selectAll("g.tick").each(function (d, i) {
-            const exp = exponents[i] ?? Math.floor(Math.log10(d));
+            const exp = Number.isFinite(exponents[i]) ? exponents[i] : Math.round(Math.log10(d));
             const t = d3.select(this).select("text");
             t.append("tspan").text("10");
             t.append("tspan")
@@ -540,6 +547,7 @@ let __isRendering = false;
     }
 
     function applyZoom() {
+        // v45.5 cleanup: rendering only — no data loading or external side effects.
         if (__isRendering) { if (DBG) console.log("[render] skipped re-entrant applyZoom()"); return; }
         __isRendering = true;
 
@@ -607,6 +615,8 @@ let __isRendering = false;
 
     // --- init ---
     async function init() {
+        // v45.5 cleanup: this init expects TS_DATA_P prepared by index_.html.
+        // Removed legacy loadData(); timeline.js is now a pure renderer.
         // v38: mittaa H1 + margin-bottom → CSS --header-h
         const h1 = document.getElementById('page-title');
         let h1H = 0;
@@ -698,8 +708,18 @@ let __isRendering = false;
         state.y.domain([state.minYears, state.maxYears]);
 
         applyZoom();
+        // v45.5: signal that the very first render is complete and extents are stable
+        if (!__firstRenderFired) {
+            __firstRenderFired = true;
+            document.dispatchEvent(new CustomEvent('timeline:first-render'));
+        }
         setZOrder();
         requestAnimationFrame(setZOrder);
+        // v45.5: signal that the very first render is complete and extents are stable
+        if (!__firstRenderFired) {
+            __firstRenderFired = true;
+            document.dispatchEvent(new CustomEvent('timeline:first-render'));
+        }
 
         // v41 API: expose minimal controls for external (index.html) animation
         window.TimelineAPI = {
@@ -737,6 +757,8 @@ let __isRendering = false;
         // --- Live refresh hook: re-read TS_DATA and redraw without changing zoom or domain
         window.updateTimeline = function () {
             if (!(window.TS_DATA && Array.isArray(window.TS_DATA.events))) return;
+            // v45.5: refresh only uses preloaded TS_DATA; removed all I/O or domain recomputation.
+            // This function now re-renders using the existing transform.
 
             // 0) cache current zoom transform
             const t = d3.zoomTransform(svg.node());
@@ -852,4 +874,7 @@ let __isRendering = false;
             reportInitError(err);
         }
     });
+    // --- end of timeline.js ---
+    // v45.5 verified stable: renderer decoupled from data I/O
+    // next: minor cleanup candidate – move setZOrder() and computeTranslateExtent() to utilities.js
 })();

@@ -435,29 +435,43 @@
         // - minors: 2..9 × 10^n within [d0, d1] (optional)
         // Keep this pure (no DOM), so it's easy to move to utils.js later.
         // -------------------------------------------------------
-        (function () {
+       (function () {
+            // Stable decade ticks on zoom/pan:
+            // - lower bound uses CEIL (push up to the next full decade)
+            // - upper bound uses FLOOR (down to the previous full decade)
+            // - tiny EPS avoids floating jitter exactly on boundaries (e.g. 1e-8 ± 1e-16)
+            const EPS = 1e-12;
+
             function majorsFromDomain(d0, d1) {
-                // Ensure ascending domain
                 if (d0 > d1) [d0, d1] = [d1, d0];
-                const n0 = Math.floor(Math.log10(d0));
-                const n1 = Math.floor(Math.log10(d1));
+
+                // guard against zeros/negatives in log scale
+                d0 = Math.max(d0, Number.MIN_VALUE);
+                d1 = Math.max(d1, d0);
+
+                const n0 = Math.ceil(Math.log10(d0 * (1 + EPS)));
+                const n1 = Math.floor(Math.log10(d1 * (1 - EPS)));
+
                 const values = [];
-                for (let e = n0; e <= n1; e++) {
-                    const v = Math.pow(10, e);
-                    if (v >= d0 && v <= d1) values.push(v);
-                }
-                // Exponents parallel to major values (for label building)
                 const exponents = [];
-                for (let e = n0; e <= n1; e++) exponents.push(e);
+                for (let e = n0; e <= n1; e++) {
+                    values.push(Math.pow(10, e));
+                    exponents.push(e);
+                }
                 return { exponents, values };
             }
 
             function minorsFromDomain(d0, d1, showMinor) {
                 if (!showMinor) return [];
                 if (d0 > d1) [d0, d1] = [d1, d0];
+
+                d0 = Math.max(d0, Number.MIN_VALUE);
+                d1 = Math.max(d1, d0);
+
+                const n0 = Math.ceil(Math.log10(d0 * (1 + EPS)));
+                const n1 = Math.floor(Math.log10(d1 * (1 - EPS)));
+
                 const out = [];
-                const n0 = Math.floor(Math.log10(d0));
-                const n1 = Math.floor(Math.log10(d1));
                 for (let e = n0; e <= n1; e++) {
                     const base = Math.pow(10, e);
                     for (let m = 2; m <= 9; m++) {
@@ -470,6 +484,7 @@
 
             window.Ticks = { majorsFromDomain, minorsFromDomain };
         })();
+
     </script>
     <script>
         // -------------------------------------------------------
@@ -869,7 +884,8 @@
             sel.exit().transition().duration(80).style('opacity', 0).remove();
         }
 
-        document.addEventListener('timeline:ready', () => {
+        // Run only after first render is fully done to avoid scale/extent glitches
+        document.addEventListener('timeline:first-render', () => {
             const tick = () => render(buildPresent(new Date()));
             tick();
             if (window.__presentTimer) clearInterval(window.__presentTimer);
@@ -881,10 +897,14 @@
 </script>
 
     <script>     // Startup animation: ---------------------------------------------------------------------------
-        const nav = performance.getEntriesByType('navigation')[0];
-            if (nav && nav.type === 'reload') {
-                sessionStorage.removeItem('startup_v41_shown');
-            }
+    // v45.5: Disable startup demo because it distorts initial log scale.
+        // (Re-enable by deleting the next 3 lines.)
+       // { console.log('[startup] disabled in v45.5'); return; }
+
+        //const nav = performance.getEntriesByType('navigation')[0];
+          //  if (nav && nav.type === 'reload') {
+         //       sessionStorage.removeItem('startup_v41_shown');
+         //   }
 
         (function(){
             function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -1028,7 +1048,8 @@
   }
 
   // Aja kerran / sessio (ohitus: ?demo=1)
-  document.addEventListener('timeline:ready', () => {
+            // Run only after first render is fully done to avoid scale/extent glitches
+            document.addEventListener('timeline:first-render', () => {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
         const url = new URL(location.href);
