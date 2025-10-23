@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.5</title>
+        <title>History Timeline v45.6</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.5</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.6</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -781,38 +781,14 @@
     </script>
     
 <script>
-    /**
-     * Present Overlay (v45.3) — 250 ms updates, aligned to g.root
-     * - Attaches under g.root so coordinates match axis/zoom exactly.
-     * - Reads major tick exponents (10^n) to map log10(time_years) → y.
-     * - No calls to init/zoom/hide → won't steal focus or close InfoBox.
-     */
-
+    /* v45.6 — NumericClock overlay (v3)
+       - Stationary top UI removed.
+       - Constant clock baseline at 1.0 s (no flashing).
+       - BIG clock time near the 1.0 s line; only seconds (and minute on rollover) fade-flash on change.
+       - From above: a line with the NEXT second label (SS) flows from 0.1 s → 1.0 s and meets the clock seconds.
+    */
     (function () {
-        // ---- time helpers ----
-        function toDecimalYear(d) { const Y = d.getFullYear(), a = new Date(Y, 0, 1), b = new Date(Y + 1, 0, 1); return Y + (d - a) / (b - a); }
-        function floorToSecond(d) { const x = new Date(d); x.setMilliseconds(0); return x; }
-        function floorToMinute(d) { const x = new Date(d); x.setSeconds(0, 0); return x; }
-        function floorToHour(d) { const x = new Date(d); x.setMinutes(0, 0, 0); return x; }
-        function floorToDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-
-        function buildPresent(now = new Date()) {
-            const it = [
-                { id: 'present-sec', label: 'this second', date: floorToSecond(now) },   // start of this second
-                { id: 'present-min', label: 'this minute', date: floorToMinute(now) },   // start of this minute
-                { id: 'present-hr', label: 'this hour', date: floorToHour(now) },
-                { id: 'present-day', label: 'today', date: floorToDay(now) }
-            ].map(e => ({ ...e, decYear: toDecimalYear(e.date) }));
-            const MSY = 365.2425 * 24 * 3600 * 1000, nowMs = now.getTime();
-            return it.map(e => ({
-                ...e,
-                yearLabel: e.decYear.toFixed(6),
-                // age since the start of the current bin → small near "now" (top)
-                time_years: Math.max(1e-10, (nowMs - e.date.getTime()) / MSY)
-            }));
-        }
-
-        // ---- map log10(time_years) → y, using ticks INSIDE g.root ----
+        // --- map y from axis ticks (g.root coords) ---
         function getAxisMapping() {
             const ticks = [...document.querySelectorAll('#timeline g.root g.axis g.tick')];
             const pts = [];
@@ -821,90 +797,195 @@
                 const exp = sup ? parseFloat(sup.textContent) : NaN;
                 const tr = t.getAttribute('transform') || '';
                 const m = tr.match(/translate\([^,]+,([^)]+)\)/);
-                if (Number.isFinite(exp) && m) pts.push({ exp, y: +m[1] }); // y in g.root coords
+                if (Number.isFinite(exp) && m) pts.push({ exp, y: +m[1] });
             }
             if (pts.length < 2) return null;
             const n = pts.length, sx = pts.reduce((s, p) => s + p.exp, 0), sy = pts.reduce((s, p) => s + p.y, 0),
                 sxx = pts.reduce((s, p) => s + p.exp * p.exp, 0), sxy = pts.reduce((s, p) => s + p.exp * p.y, 0),
                 a = (n * sxy - sx * sy) / (n * sxx - sx * sx), b = (sy - a * sx) / n;
-            return v => a * Math.log10(Math.max(1e-12, v)) + b; // y in g.root coords
+            return v => a * Math.log10(Math.max(1e-12, v)) + b; // y(px) for “years since now”
         }
 
-        // ---- geometry in g.root coords (axis & zoomBar live here) ----
-        function axisRight() {
+        // --- geometry in g.root (span between axis right and zoom bar left) ---
+        function axisRightPx() {
             const axis = document.querySelector('#timeline g.root g.axis');
             if (!axis) return 14;
             try { const r = axis.getBBox(); return r.x + r.width; } catch { return 14; }
         }
-        function zoomLeft() {
+        function zoomLeftPx() {
             const z = document.querySelector('#timeline g.root g.zoomBar .track')
                 || document.querySelector('#timeline g.root g.zoomBar');
-            if (!z) return 320;
-            try { return z.getBBox().x; } catch { return 320; }
+            if (!z) return window.innerWidth - 36;
+            try { return z.getBBox().x; } catch { return window.innerWidth - 36; }
         }
 
-        // ---- ensure overlay UNDER g.root (inherits transform automatically) ----
-        function ensureOverlay() {
+        // --- moving layer (under g.root) ---
+        function ensureLayer() {
             const root = d3.select('#timeline').select('g.root');
             let g = root.select('#present-overlay');
-            if (g.empty()) {
-                g = root.append('g')
-                    .attr('id', 'present-overlay')
-                    .style('pointer-events', 'none'); // never steals input
-            }
+            if (g.empty()) g = root.append('g').attr('id', 'present-overlay').attr('class', 'numeric-clock');
             return g;
         }
 
-        function render(items) {
-            const mapY = getAxisMapping(); if (!mapY) return;
-            const x0 = axisRight() + 6, x1 = zoomLeft() - 18, xText = x0 + 10; // all in g.root coords
-            const g = ensureOverlay();
+        // --- constants & state ---
+        const SEC_TO_YEARS = 1 / 31557600;
+        const TRAIL_SECS = 7;
 
-            const sel = g.selectAll('g.present-item').data(items, d => d.id);
-            const ent = sel.enter().append('g').attr('class', 'present-item').style('opacity', 0);
+        // EN: the “this sec” anchor on your axis is fixed to 10^-8 years (~0.315576 s)
+        const BASE_TARGET_YEARS = 1e-8;
+        const BASE_TARGET_SEC = BASE_TARGET_YEARS * 31557600;
 
-            ent.append('line')
-                .attr('x1', x0).attr('x2', x1).attr('y1', 0).attr('y2', 0)
-                .attr('stroke', '#ff8c42').attr('stroke-width', 2)
-                .attr('stroke-opacity', 0.9).attr('stroke-dasharray', '2 3');
+        // EN: preferred visual headroom for the approaching line; final start is clamped to < BASE_TARGET_SEC
+        let APPROACH_START = 0.5; // you can keep your UI choice here; we’ll clamp it under the base below
 
-            ent.append('text')
-                .attr('x', xText).attr('y', 0).attr('dy', '0.32em')
-                .attr('font-size', 10).attr('fill', '#ffd399')
-                .attr('stroke', 'rgba(0,0,0,0.35)').attr('stroke-width', 0.6);
+        let mapY = null;
+        let xL = 0, xR = 0;       // horizontal span (g.root coords)
+        let lastWhole = -1;
+        const trail = [];         // perf.now() stamps for last whole seconds
+        let yBase = 0;            // cached y for the 1.0 s baseline
 
-            ent.transition().duration(100).style('opacity', 1);
+        // cached selection refs
+        let gLayer, lineBase, clockText, nextLine, nextLabel;
 
-            sel.merge(ent).each(function (d) {
-                const y = mapY(d.time_years);
-                d3.select(this).select('line').attr('x1', x0).attr('x2', x1).attr('y1', y).attr('y2', y);
-                d3.select(this).select('text').attr('x', xText).attr('y', y).text(`${d.label} (${d.yearLabel})`);
-            });
+        function layoutStatics() {
+            mapY = getAxisMapping();
+            if (!mapY) return;
 
-            sel.exit().transition().duration(80).style('opacity', 0).remove();
+            xL = axisRightPx() + 8;
+            xR = zoomLeftPx() - 18;
+
+            gLayer = ensureLayer();
+
+            // EN: anchor baseline to the present card’s “this sec”: 10^-8 years
+            yBase = mapY(BASE_TARGET_YEARS);
+
+            if (!lineBase) lineBase = gLayer.append('line').attr('class', 'clockBaseLine');
+            lineBase.attr('x1', xL).attr('x2', xR).attr('y1', yBase).attr('y2', yBase);
+
+            // BIG clock time near the baseline (split into HM + SS tspans)
+            if (!clockText) {
+                clockText = gLayer.append('text')
+                    .attr('class', 'clockTime')
+                    .attr('text-anchor', 'end')
+                    .attr('dominant-baseline', 'middle');
+                clockText.append('tspan').attr('class', 'hm'); // HH:MM
+                clockText.append('tspan').attr('class', 'sep').text(':'); // separator :
+                clockText.append('tspan').attr('class', 'ss'); // SS
+            }
+            clockText.attr('x', xR - 6).attr('y', yBase - 8);
+
+            // approaching next-second line + its label (SS)
+            if (!nextLine) nextLine = gLayer.append('line').attr('class', 'nextLine');
+            if (!nextLabel) nextLabel = gLayer.append('text').attr('class', 'nextLabel').attr('text-anchor', 'end').attr('dominant-baseline', 'middle');
         }
 
-        // Run only after first render is fully done to avoid scale/extent glitches
-        document.addEventListener('timeline:first-render', () => {
-            const tick = () => render(buildPresent(new Date()));
-            tick();
-            if (window.__presentTimer) clearInterval(window.__presentTimer);
-            // UPDATE RATE: 250 ms
-            window.__presentTimer = setInterval(tick, 250);
-            window.addEventListener('resize', tick, { passive: true });
-        });
+        function formatHM(d) {
+            const h = d.getHours().toString().padStart(2, '0');
+            const m = d.getMinutes().toString().padStart(2, '0');
+            return `${h}:${m}`;
+        }
+        function formatSS(d) {
+            return d.getSeconds().toString().padStart(2, '0');
+        }
+
+        function updateClock(nowMs) {
+            const d = new Date();
+            const ss = formatSS(d);
+            const hm = formatHM(d);
+
+            // place base text (no flashing on line)
+            clockText.select('tspan.hm').text(hm);
+            clockText.select('tspan.ss').text(ss);
+
+            // seconds (and minute at rollover) do a soft flash on change
+            const whole = Math.floor(nowMs / 1000);
+            if (whole !== lastWhole) {
+                const prev = new Date(nowMs - 1000);
+                const prevMin = prev.getMinutes();
+                const currMin = d.getMinutes();
+
+                const ssSpan = clockText.select('tspan.ss');
+                ssSpan.classed('secFlash', false);
+                void ssSpan.node().offsetWidth;     // reflow to retrigger transition
+                ssSpan.classed('secFlash', true);
+                setTimeout(() => ssSpan.classed('secFlash', false), 280);
+
+                if (currMin !== prevMin) {
+                    const hmSpan = clockText.select('tspan.hm');
+                    hmSpan.classed('minFlash', false);
+                    void hmSpan.node().offsetWidth;
+                    hmSpan.classed('minFlash', true);
+                    setTimeout(() => hmSpan.classed('minFlash', false), 320);
+                }
+            }
+        }
+
+        function renderTrails(nowMs) {
+            // spawn once per new whole second
+            const whole = Math.floor(nowMs / 1000);
+            if (whole !== lastWhole) {
+                lastWhole = whole;
+                trail.unshift(nowMs);
+                while (trail.length > TRAIL_SECS) trail.pop();
+            }
+
+            const sel = gLayer.selectAll('line.trail').data(trail, d => d);
+            sel.enter().append('line').attr('class', 'trail').merge(sel)
+                .each(function (stamp) {
+                    const age = (nowMs - stamp) / 1000; // 0..TRAIL_SECS
+                    const y = mapY(Math.max(1e-6, age) * SEC_TO_YEARS);
+                    const a = Math.max(0, 1 - (age / TRAIL_SECS));
+                    d3.select(this).attr('x1', xL).attr('x2', xR).attr('y1', y).attr('y2', y).style('opacity', a);
+                });
+            sel.exit().remove();
+        }
+
+        function renderApproach(nowMs) {
+            // approaching “next second” from 0.1 s → 1.0 s
+            const frac = (nowMs / 1000) % 1;                  // 0..1 within second
+            const agePast = APPROACH_START + 0.9 * frac;      // 0.5..1.4, but we clamp by baseline
+
+            // raw position for the approaching line
+            const yRaw = mapY(agePast * SEC_TO_YEARS);
+            // clamp: never let the approaching line drop below the clock baseline
+            const yNext = Math.min(yRaw, yBase - 2);          // stop ~2 px above baseline
+
+            nextLine
+                .attr('x1', xL).attr('x2', xR)
+                .attr('y1', yNext).attr('y2', yNext)
+                .style('opacity', Math.pow(frac, 1.7));         // same fade-in as before
+
+            // upcoming SS label (moves with the line, stays above clock text)
+            const tNow = Date.now();
+            const nextDate = new Date(tNow + (1000 - (tNow % 1000)));
+            const nextSS = nextDate.getSeconds().toString().padStart(2, '0');
+
+            nextLabel
+                .text(nextSS)
+                .attr('x', xR - 6)
+                .attr('y', yNext - 10)                          // a touch higher than before
+                .style('opacity', Math.pow(frac, 1.7));
+        }
+
+        function frame() {
+            layoutStatics();
+            if (!mapY) { requestAnimationFrame(frame); return; }
+
+            const now = performance.now();
+            updateClock(now);
+            renderTrails(now);
+            renderApproach(now);
+
+            requestAnimationFrame(frame);
+        }
+
+        document.addEventListener('timeline:first-render', frame);
+        document.addEventListener('timeline:render', frame);
+        window.addEventListener('resize', frame, { passive: true });
     })();
 </script>
 
     <script>     // Startup animation: ---------------------------------------------------------------------------
-    // v45.5: Disable startup demo because it distorts initial log scale.
-        // (Re-enable by deleting the next 3 lines.)
-       // { console.log('[startup] disabled in v45.5'); return; }
-
-        //const nav = performance.getEntriesByType('navigation')[0];
-          //  if (nav && nav.type === 'reload') {
-         //       sessionStorage.removeItem('startup_v41_shown');
-         //   }
 
         (function(){
             function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
