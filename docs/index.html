@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.6</title>
+        <title>History Timeline v45.7</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.6</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.7</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -615,69 +615,116 @@
         const floorToHour = d => (d = new Date(d), d.setMinutes(0, 0, 0), d);
         const floorToDay = d => (d = new Date(d), d.setHours(0, 0, 0, 0), d);
 
-       /* --- Build present anchors (stable header + 4-second trail) --- */
-        function buildPresent() {
-            const now = new Date(); // local system clock
+      /* --- Build present anchors (stable header + trailing seconds + fixed intervals) --- */
+        function buildPresent(now = new Date()) {
+            const MSY = 31557600 * 1000;      // ms per tropical year
+            const SEC_TO_YEARS = 1 / 31557600;
+            const THIS_SEC_EPS = SEC_TO_YEARS * 0.02;   // ~20 ms safety gap
+            const USE_FIXED_ONE_SEC = true;
 
-            // format helpers
-            const pad = n => String(n).padStart(2, "0");
-            const toClock = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-            const toClockSec = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-            const toDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-            const toMonth = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-            const toYear = d => `${d.getFullYear()}`;
+            const items = [];
 
-            // “starts of” current periods
-            const secStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
-                now.getHours(), now.getMinutes(), now.getSeconds(), 0);
-            const minStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
-                now.getHours(), now.getMinutes(), 0, 0);
-            const hourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
-                now.getHours(), 0, 0, 0);
-            const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-            const yearStart = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+            // --- helpers ---
+            const tNow = Date.now();
+            const withinSec = (tNow % 1000) / 1000;
+            const thisSecAgeSec = USE_FIXED_ONE_SEC ? 1.0 : Math.max(0.1, withinSec);
+            const thisSecYears = thisSecAgeSec * SEC_TO_YEARS;
 
-            // 0) STABLE HEADER ANCHOR ~0.1 s from now → keeps card top steady
-            const anchor = {
-                id: 'present-header-anchor',
-                label: '',                // no visible text
+            // --- small reference anchors ---
+            const REF_0_1S_YEARS = 0.1 * SEC_TO_YEARS;
+            const ONE_MIN_YEARS = 60 * SEC_TO_YEARS;
+            const ONE_HOUR_YEARS = 3600 * SEC_TO_YEARS;
+            const ONE_DAY_YEARS = 86400 * SEC_TO_YEARS;
+            const ONE_MONTH_YEARS = 1 / 12;
+            const ONE_YEAR_YEARS = 1;
+
+            // helper for label text  (formats nicely)
+            function fmtAgo(secs) {
+                if (secs < 1) return `${secs.toFixed(1)} s ago`;
+                if (secs < 60) return `${secs.toFixed(0)} s ago`;
+                if (secs < 3600) return `${(secs / 60).toFixed(0)} min ago`;
+                if (secs < 86400) return `${(secs / 3600).toFixed(0)} h ago`;
+                if (secs < 2592000) return `${(secs / 86400).toFixed(0)} d ago`;
+                if (secs < 31557600) return `${(secs / 2592000).toFixed(0)} mo ago`;
+                return `${(secs / 31557600).toFixed(0)} y ago`;
+            }
+
+            // ─────────────────────────────────────────────
+            // 1) "this sec" shows next clock second, labeled "(time 1 s ago)"
+            const nextDate = new Date(now.getTime() + 1000); // +1 second ahead
+            const nextTime = nextDate.toTimeString().slice(0, 8);
+            items.push({
                 theme: 'present',
-                t: new Date(now.getTime() - 10), // ~0.1 s before now
-                isAnchor: true            // we’ll hide it in drawing
-            };
+                label: `${nextTime} (time 1 s ago)`,
+                time_years: thisSecYears
+            });
 
-            // 1) “this …” anchors
-            const main = [
-                { id: 'present-this-sec', label: `${toClockSec(now)} (this sec)`, theme: 'present', t: secStart },
-                { id: 'present-this-min', label: `${toClock(minStart)} (this min)`, theme: 'present', t: minStart },
-                { id: 'present-this-hour', label: `${toClock(hourStart)} (this hour)`, theme: 'present', t: hourStart },
-                { id: 'present-this-day', label: `${toDate(dayStart)} (this day)`, theme: 'present', t: dayStart },
-                { id: 'present-this-month', label: `${toMonth(monthStart)} (this month)`, theme: 'present', t: monthStart },
-                { id: 'present-this-year', label: `${toYear(yearStart)} (this year)`, theme: 'present', t: yearStart }
-            ];
+            // ─────────────────────────────────────────────
+            // 2) short reference (0.1 s ago) — place slightly *above* “this sec”
+            items.push({
+                theme: 'present',
+                label: fmtAgo(0.1),
+                time_years: Math.min(thisSecYears - THIS_SEC_EPS, REF_0_1S_YEARS)
+            });
 
-            // 2) TRAIL: show 4 previous seconds as a continuum
-            const trail = [];
-            for (let k = 1; k <= 4; k++) {
-                const t = new Date(secStart.getTime() - k * 1000);
-                trail.push({
-                    id: `present-sec-trail-${k}`,
-                    label: toClockSec(t),    // just time; no “last …” text
+            // ─────────────────────────────────────────────
+            // 3) stepped trail (5s): show 5s & 10s, then only 15s-floor items; stop at 45s
+            //    Visible set (when ages ≥ 1s): 5s, 10s, 15s, 30s, 45s
+            const step5 = 5;                      // base step (seconds)
+            const maxAgo = 45;                    // stop at 45s
+            const stepMs = step5 * 1000;
+            const anchorMs0 = Math.floor(tNow / stepMs) * stepMs; // last “tasa-5s” anchor
+
+            // helper → should this seconds-ago value be included?
+            function includeSec(secAgo) {
+                if (secAgo <= 10) return true;      // first two at 5s grid: 5s, 10s
+                if (secAgo % 15 === 0) return true; // thereafter only 15s-floor: 15s, 30s, 45s
+                return false;
+            }
+
+            for (let secAgo = step5; secAgo <= maxAgo; secAgo += step5) {
+                if (!includeSec(secAgo)) continue;
+
+                const stampMs = anchorMs0 - (secAgo * 1000);      // exact clock time at that anchor
+                const ageSec = (tNow - stampMs) / 1000;          // how old it is now
+
+                if (ageSec < 1.0) continue;                       // don't show until it's ≥ 1s old
+
+                // DISPLAY TIME for the anchor
+                const labelDt = new Date(stampMs);
+                const labelStr = labelDt.toTimeString().slice(0, 8);
+
+                // POSITION & LABEL AGE: add +1s so the newest trail sits clearly below "this sec"
+                const posYears = (ageSec + 1.0) * SEC_TO_YEARS;  // ↓ push farther down by +1s
+                const labelAgoS = ageSec + 1.0;                   // and show that same +1s in the label
+
+                items.push({
                     theme: 'present',
-                    t
+                    label: `${labelStr} (${fmtAgo(labelAgoS)})`,
+                    time_years: Math.max(thisSecYears + THIS_SEC_EPS, posYears)
                 });
             }
 
-            // map all to render fields
-            const items = [anchor, ...main, ...trail].map(e => ({
-                ...e,
-                year: e.t.getFullYear(),                 // not shown for present in draw
-                time_years: yearsBetween(e.t, now)
-            }));
+            // ─────────────────────────────────────────────
+            // 4) fixed larger intervals
+            const FIXED = [
+                { secs: 60, years: ONE_MIN_YEARS },
+                { secs: 3600, years: ONE_HOUR_YEARS },
+                { secs: 86400, years: ONE_DAY_YEARS },
+                { secs: 2592000, years: ONE_MONTH_YEARS },
+                { secs: 31557600, years: ONE_YEAR_YEARS }
+            ];
+            for (const f of FIXED) {
+                items.push({
+                    theme: 'present',
+                    label: fmtAgo(f.secs),
+                    time_years: Math.max(thisSecYears + THIS_SEC_EPS, f.years)
+                });
+            }
 
-            // sort by age ascending: this sec, this min, ..., trail seconds (older lower)
-            return items.sort((a, b) => a.time_years - b.time_years);
+            // ensure chronological order (newest → oldest)
+            items.sort((a, b) => a.time_years - b.time_years);
+            return items;
         }
 
         // expose for realtime updater
@@ -779,209 +826,47 @@
     <script
         src="timeline.js"> // ------------------------------ main rendering module  //
     </script>
-    
+
 <script>
-    /* v45.6 — NumericClock overlay (v3)
-       - Stationary top UI removed.
-       - Constant clock baseline at 1.0 s (no flashing).
-       - BIG clock time near the 1.0 s line; only seconds (and minute on rollover) fade-flash on change.
-       - From above: a line with the NEXT second label (SS) flows from 0.1 s → 1.0 s and meets the clock seconds.
+    /* v45.6 — Present theme live updater (1 Hz, instant refresh after render)
+       - Rebuild 'present' once per second AND immediately on timeline:render.
+       - Fixes the 1s color lag after zoom/scroll.
     */
     (function () {
-        // --- map y from axis ticks (g.root coords) ---
-        function getAxisMapping() {
-            const ticks = [...document.querySelectorAll('#timeline g.root g.axis g.tick')];
-            const pts = [];
-            for (const t of ticks) {
-                const sup = t.querySelector('tspan:nth-of-type(2)');
-                const exp = sup ? parseFloat(sup.textContent) : NaN;
-                const tr = t.getAttribute('transform') || '';
-                const m = tr.match(/translate\([^,]+,([^)]+)\)/);
-                if (Number.isFinite(exp) && m) pts.push({ exp, y: +m[1] });
-            }
-            if (pts.length < 2) return null;
-            const n = pts.length, sx = pts.reduce((s, p) => s + p.exp, 0), sy = pts.reduce((s, p) => s + p.y, 0),
-                sxx = pts.reduce((s, p) => s + p.exp * p.exp, 0), sxy = pts.reduce((s, p) => s + p.exp * p.y, 0),
-                a = (n * sxy - sx * sy) / (n * sxx - sx * sx), b = (sy - a * sx) / n;
-            return v => a * Math.log10(Math.max(1e-12, v)) + b; // y(px) for “years since now”
+        // helper: (re)build only present items and redraw
+        function refreshPresent(nowDate) {
+            const present = (typeof buildPresent === 'function')
+                ? buildPresent(nowDate).sort((a, b) => a.time_years - b.time_years)
+                : [];
+
+            const base = (window.TS_DATA && Array.isArray(TS_DATA.events))
+                ? TS_DATA.events.filter(e => e.theme !== 'present')
+                : [];
+
+            window.TS_DATA = Object.assign({}, window.TS_DATA, { events: base.concat(present) });
+
+            if (typeof window.updateTimeline === 'function') window.updateTimeline();
         }
 
-        // --- geometry in g.root (span between axis right and zoom bar left) ---
-        function axisRightPx() {
-            const axis = document.querySelector('#timeline g.root g.axis');
-            if (!axis) return 14;
-            try { const r = axis.getBBox(); return r.x + r.width; } catch { return 14; }
-        }
-        function zoomLeftPx() {
-            const z = document.querySelector('#timeline g.root g.zoomBar .track')
-                || document.querySelector('#timeline g.root g.zoomBar');
-            if (!z) return window.innerWidth - 36;
-            try { return z.getBBox().x; } catch { return window.innerWidth - 36; }
+        // steady 1 Hz driver
+        let lastS = -1;
+        function loop() {
+            const t = Date.now(), s = Math.floor(t / 1000);
+            if (s !== lastS) { lastS = s; refreshPresent(new Date(t)); }
+            requestAnimationFrame(loop);
         }
 
-        // --- moving layer (under g.root) ---
-        function ensureLayer() {
-            const root = d3.select('#timeline').select('g.root');
-            let g = root.select('#present-overlay');
-            if (g.empty()) g = root.append('g').attr('id', 'present-overlay').attr('class', 'numeric-clock');
-            return g;
-        }
+        // start after the first render
+        document.addEventListener('timeline:first-render', () => {
+            // do an immediate refresh so colors/positions are correct right away
+            refreshPresent(new Date());
+            requestAnimationFrame(loop);
+        });
 
-        // --- constants & state ---
-        const SEC_TO_YEARS = 1 / 31557600;
-        const TRAIL_SECS = 7;
-
-        // EN: the “this sec” anchor on your axis is fixed to 10^-8 years (~0.315576 s)
-        const BASE_TARGET_YEARS = 1e-8;
-        const BASE_TARGET_SEC = BASE_TARGET_YEARS * 31557600;
-
-        // EN: preferred visual headroom for the approaching line; final start is clamped to < BASE_TARGET_SEC
-        let APPROACH_START = 0.5; // you can keep your UI choice here; we’ll clamp it under the base below
-
-        let mapY = null;
-        let xL = 0, xR = 0;       // horizontal span (g.root coords)
-        let lastWhole = -1;
-        const trail = [];         // perf.now() stamps for last whole seconds
-        let yBase = 0;            // cached y for the 1.0 s baseline
-
-        // cached selection refs
-        let gLayer, lineBase, clockText, nextLine, nextLabel;
-
-        function layoutStatics() {
-            mapY = getAxisMapping();
-            if (!mapY) return;
-
-            xL = axisRightPx() + 8;
-            xR = zoomLeftPx() - 18;
-
-            gLayer = ensureLayer();
-
-            // EN: anchor baseline to the present card’s “this sec”: 10^-8 years
-            yBase = mapY(BASE_TARGET_YEARS);
-
-            if (!lineBase) lineBase = gLayer.append('line').attr('class', 'clockBaseLine');
-            lineBase.attr('x1', xL).attr('x2', xR).attr('y1', yBase).attr('y2', yBase);
-
-            // BIG clock time near the baseline (split into HM + SS tspans)
-            if (!clockText) {
-                clockText = gLayer.append('text')
-                    .attr('class', 'clockTime')
-                    .attr('text-anchor', 'end')
-                    .attr('dominant-baseline', 'middle');
-                clockText.append('tspan').attr('class', 'hm'); // HH:MM
-                clockText.append('tspan').attr('class', 'sep').text(':'); // separator :
-                clockText.append('tspan').attr('class', 'ss'); // SS
-            }
-            clockText.attr('x', xR - 6).attr('y', yBase - 8);
-
-            // approaching next-second line + its label (SS)
-            if (!nextLine) nextLine = gLayer.append('line').attr('class', 'nextLine');
-            if (!nextLabel) nextLabel = gLayer.append('text').attr('class', 'nextLabel').attr('text-anchor', 'end').attr('dominant-baseline', 'middle');
-        }
-
-        function formatHM(d) {
-            const h = d.getHours().toString().padStart(2, '0');
-            const m = d.getMinutes().toString().padStart(2, '0');
-            return `${h}:${m}`;
-        }
-        function formatSS(d) {
-            return d.getSeconds().toString().padStart(2, '0');
-        }
-
-        function updateClock(nowMs) {
-            const d = new Date();
-            const ss = formatSS(d);
-            const hm = formatHM(d);
-
-            // place base text (no flashing on line)
-            clockText.select('tspan.hm').text(hm);
-            clockText.select('tspan.ss').text(ss);
-
-            // seconds (and minute at rollover) do a soft flash on change
-            const whole = Math.floor(nowMs / 1000);
-            if (whole !== lastWhole) {
-                const prev = new Date(nowMs - 1000);
-                const prevMin = prev.getMinutes();
-                const currMin = d.getMinutes();
-
-                const ssSpan = clockText.select('tspan.ss');
-                ssSpan.classed('secFlash', false);
-                void ssSpan.node().offsetWidth;     // reflow to retrigger transition
-                ssSpan.classed('secFlash', true);
-                setTimeout(() => ssSpan.classed('secFlash', false), 280);
-
-                if (currMin !== prevMin) {
-                    const hmSpan = clockText.select('tspan.hm');
-                    hmSpan.classed('minFlash', false);
-                    void hmSpan.node().offsetWidth;
-                    hmSpan.classed('minFlash', true);
-                    setTimeout(() => hmSpan.classed('minFlash', false), 320);
-                }
-            }
-        }
-
-        function renderTrails(nowMs) {
-            // spawn once per new whole second
-            const whole = Math.floor(nowMs / 1000);
-            if (whole !== lastWhole) {
-                lastWhole = whole;
-                trail.unshift(nowMs);
-                while (trail.length > TRAIL_SECS) trail.pop();
-            }
-
-            const sel = gLayer.selectAll('line.trail').data(trail, d => d);
-            sel.enter().append('line').attr('class', 'trail').merge(sel)
-                .each(function (stamp) {
-                    const age = (nowMs - stamp) / 1000; // 0..TRAIL_SECS
-                    const y = mapY(Math.max(1e-6, age) * SEC_TO_YEARS);
-                    const a = Math.max(0, 1 - (age / TRAIL_SECS));
-                    d3.select(this).attr('x1', xL).attr('x2', xR).attr('y1', y).attr('y2', y).style('opacity', a);
-                });
-            sel.exit().remove();
-        }
-
-        function renderApproach(nowMs) {
-            // approaching “next second” from 0.1 s → 1.0 s
-            const frac = (nowMs / 1000) % 1;                  // 0..1 within second
-            const agePast = APPROACH_START + 0.9 * frac;      // 0.5..1.4, but we clamp by baseline
-
-            // raw position for the approaching line
-            const yRaw = mapY(agePast * SEC_TO_YEARS);
-            // clamp: never let the approaching line drop below the clock baseline
-            const yNext = Math.min(yRaw, yBase - 2);          // stop ~2 px above baseline
-
-            nextLine
-                .attr('x1', xL).attr('x2', xR)
-                .attr('y1', yNext).attr('y2', yNext)
-                .style('opacity', Math.pow(frac, 1.7));         // same fade-in as before
-
-            // upcoming SS label (moves with the line, stays above clock text)
-            const tNow = Date.now();
-            const nextDate = new Date(tNow + (1000 - (tNow % 1000)));
-            const nextSS = nextDate.getSeconds().toString().padStart(2, '0');
-
-            nextLabel
-                .text(nextSS)
-                .attr('x', xR - 6)
-                .attr('y', yNext - 10)                          // a touch higher than before
-                .style('opacity', Math.pow(frac, 1.7));
-        }
-
-        function frame() {
-            layoutStatics();
-            if (!mapY) { requestAnimationFrame(frame); return; }
-
-            const now = performance.now();
-            updateClock(now);
-            renderTrails(now);
-            renderApproach(now);
-
-            requestAnimationFrame(frame);
-        }
-
-        document.addEventListener('timeline:first-render', frame);
-        document.addEventListener('timeline:render', frame);
-        window.addEventListener('resize', frame, { passive: true });
+        // also refresh immediately after any zoom/scroll re-render (no 1s wait)
+        document.addEventListener('timeline:render', () => {
+            refreshPresent(new Date());
+        });
     })();
 </script>
 
