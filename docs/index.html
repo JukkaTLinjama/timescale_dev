@@ -625,7 +625,10 @@
             const items = [];
 
             // --- helpers ---
-            const tNow = Date.now();
+            const tNowRaw = Date.now();
+            // Quantize to whole seconds so multiple refresh paths (1 Hz + render) see identical “now”
+            const tNow = Math.floor(tNowRaw / 1000) * 1000;
+
             const withinSec = (tNow % 1000) / 1000;
             const thisSecAgeSec = USE_FIXED_ONE_SEC ? 1.0 : Math.max(0.1, withinSec);
             const thisSecYears = thisSecAgeSec * SEC_TO_YEARS;
@@ -668,41 +671,59 @@
             });
 
             // ─────────────────────────────────────────────
-            // 3) stepped trail (5s): show 5s & 10s, then only 15s-floor items; stop at 45s
-            //    Visible set (when ages ≥ 1s): 5s, 10s, 15s, 30s, 45s
-            const step5 = 5;                      // base step (seconds)
-            const maxAgo = 45;                    // stop at 45s
-            const stepMs = step5 * 1000;
-            const anchorMs0 = Math.floor(tNow / stepMs) * stepMs; // last “tasa-5s” anchor
+            // 3) Deterministic trail from a single post-load 5 s anchor (no per-marker state)
 
-            // helper → should this seconds-ago value be included?
-            function includeSec(secAgo) {
-                if (secAgo <= 10) return true;      // first two at 5s grid: 5s, 10s
-                if (secAgo % 15 === 0) return true; // thereafter only 15s-floor: 15s, 30s, 45s
-                return false;
+            // 3.1) asetetaan pysyvä ensimmäinen 5 s raja: vasta sivulatauksen JÄLKEINEN raja
+            if (typeof window.__first5sAnchorMs === 'undefined') {
+                const bucketAtLoad = Math.floor(tNow / 5000);
+                const bucketNow = Math.floor(tNow / 5000);
+                // Ei vielä luoda ankkuria; odotetaan että ylitetään seuraava 5 s -raja
+                window.__first5sAnchorMs = null;
+                window.__first5sLoadBucket = bucketAtLoad;
+            }
+            // jos rajaa ei vielä ole ja on ylitetty seuraava 5 s -bucket, lukitaan se
+            if (window.__first5sAnchorMs === null) {
+                const bucketNow = Math.floor(tNow / 5000);
+                if (bucketNow > window.__first5sLoadBucket) {
+                    window.__first5sAnchorMs = bucketNow * 5000; // täsmälleen …:50/…:55/…:00/…
+                }
             }
 
-            for (let secAgo = step5; secAgo <= maxAgo; secAgo += step5) {
-                if (!includeSec(secAgo)) continue;
+            const firstAnchor = window.__first5sAnchorMs;
 
-                const stampMs = anchorMs0 - (secAgo * 1000);      // exact clock time at that anchor
-                const ageSec = (tNow - stampMs) / 1000;          // how old it is now
+            if (typeof firstAnchor === 'number') {
+                // 3.2) lasketaan kaikki 5 s -ankkurit välillä [firstAnchor, tNow]
+                // i = 0 on ensimmäinen ankkuri, i kasvaa yhdellä jokaisesta 5 s rajasta
+                const n = Math.floor((tNow - firstAnchor) / 5000); // 0..N
+                for (let i = 0; i <= n; i++) {
+                    const anchor = firstAnchor + i * 5000;  // tämän markkerin syntyhetki (5 s raja)
 
-                if (ageSec < 1.0) continue;                       // don't show until it's ≥ 1s old
+                    // markkerin ikä: alkaa 2 s:sta ja kasvaa 1 s/s
+                    const ageSec = 2 + (tNow - anchor) / 1000;
 
-                // DISPLAY TIME for the anchor
-                const labelDt = new Date(stampMs);
-                const labelStr = labelDt.toTimeString().slice(0, 8);
+                    // Integroitunut ikä (kokonaisluvuksi), käyttöön vain näkyvyyskriteeriin
+                    const ageInt = Math.floor(ageSec + 1e-9);
 
-                // POSITION & LABEL AGE: add +1s so the newest trail sits clearly below "this sec"
-                const posYears = (ageSec + 1.0) * SEC_TO_YEARS;  // ↓ push farther down by +1s
-                const labelAgoS = ageSec + 1.0;                   // and show that same +1s in the label
+                    // 3.3) näkyvyys/kuolema:
+                    //  - näytä kaikki kun ikä < 15 s
+                    //  - 15–45 s: näytä tasan 15:n monikerrat (15, 30)
+                    //  - ≥ 45 s: älä näytä mitään
+                    if (ageInt >= 45) continue;
+                    if (ageInt < 45 && (ageInt < 15 || ageInt % 15 === 0)) { /* näkyvä */ }
+                    else continue;
 
-                items.push({
-                    theme: 'present',
-                    label: `${labelStr} (${fmtAgo(labelAgoS)})`,
-                    time_years: Math.max(thisSecYears + THIS_SEC_EPS, posYears)
-                });
+                    // 3.4) labelin kellonaika on syntyankkuri (…:50/…:55/…:00/…), "ago" on ageInt
+                    const labelStr = new Date(anchor).toTimeString().slice(0, 8);
+
+                    items.push({
+                        theme: 'present',
+                        label: `${labelStr} (${fmtAgo(ageInt)})`,
+                        // sijainti käyttää jatkuvaa aikaa; pieni ε pitää sen “this sec” -viivan alla
+                        time_years: Math.max(thisSecYears + THIS_SEC_EPS, ageSec * SEC_TO_YEARS)
+                    });
+                    // DEBUG (poista kun ok):
+                    console.log('trail', { i, anchor, ageSec: ageSec.toFixed(2), ageInt });
+                }
             }
 
             // ─────────────────────────────────────────────
