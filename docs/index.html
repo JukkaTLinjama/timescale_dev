@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.7</title>
+        <title>History Timeline v45.8</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.7</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.8</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -131,9 +131,25 @@
 
             /** One-line meta string (e.g., year + theme if present). */
             Util.eventMeta = function (ev) {
-                const year = (ev?.year ?? '').toString();
-                const theme = ev?.theme ? `Theme: ${ev.theme}` : null;
-                return [year, theme].filter(Boolean).join(' · ');
+                // Prefer preformatted "when" text (Finnish), then "ago", then raw year.
+                const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
+                const theme = ev?.theme ? `Theme: ${ev.theme}` : null; // keep label in English for now
+                return [when, theme].filter(Boolean).join(' · ');
+            };
+            // Build the event title text for labels on the timeline.
+            // Uses precomputed display_when/display_ago; falls back to plain label.
+            // Never shows empty parentheses.
+            Util.eventTitle = function (ev) {
+                const base = Util.eventLabel(ev);
+                const when = (ev?.display_when || ev?.display_ago || '').toString().trim();
+                return when ? `${base} (${when})` : base;
+            };
+            // Build short event title for on-chart labels: use ONLY relative time.
+            // Never shows empty parentheses.
+            Util.eventTitleShort = function (ev) {
+                const base = Util.eventLabel(ev);
+                const ago = (ev?.display_ago || '').toString().trim();
+                return ago ? `${base} (${ago})` : base;
             };
 
             /** Safe truncation with ellipsis; avoids breaking short strings. */
@@ -206,6 +222,21 @@
         (function () {
             const infoCfg = { margin: 10 };  // minimal distance from window edges (px)
             let infoEl = null;               // singleton DOM element for the popup
+            // --- User intent tracking to keep the InfoBox persistent during programmatic refreshes ---
+            // We only allow hiding the tooltip shortly after a *trusted* user action (click, wheel, key, touch).
+            // All other (programmatic) calls to hide() will be ignored.
+            // This fixes the "tooltip disappears every second" issue without touching timeline.js.
+            let __lastUserIntentTs = 0;
+            const __USER_INTENT_WINDOW_MS = 1200;
+
+            // Capture trusted user interactions very early in the event flow.
+            ['pointerdown', 'wheel', 'keydown', 'touchstart'].forEach((type) => {
+                window.addEventListener(type, (e) => {
+                    if (e && e.isTrusted) {
+                        __lastUserIntentTs = performance.now();
+                    }
+                }, { capture: true, passive: true });
+            });
 
             // Ensure the info box element exists (lazy creation)
             function ensureInfoEl() {
@@ -220,8 +251,9 @@
             // Build inner HTML structure for the info popup based on event data
             function buildEventHTML(ev) {
                 const label = ev?.display_label || ev?.label || 'Event';
-                const year = (ev?.year ?? '').toString();
-                const meta = [year, ev?.theme ? `Theme: ${ev.theme}` : null]
+                // Prefer the precomputed Finnish "when" text
+                const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
+                const meta = [when, ev?.theme ? `Theme: ${ev.theme}` : null]
                     .filter(Boolean)
                     .join(' · ');
 
@@ -250,6 +282,10 @@
 
             // Show the info box at a screen position derived from the event’s bounding box
             function show(ev, screenBox) {
+                // Opening the InfoBox should not be followed by an immediate auto-hide.
+                // Reset user-intent timestamp so programmatic refreshes won't close it.
+                __lastUserIntentTs = 0;
+
                 const el = ensureInfoEl();
                 el.innerHTML = buildEventHTML(ev);
                 el.classList.remove('is-visible');
@@ -287,6 +323,16 @@
 
             // Hide the info box (simply remove visible class)
             function hide() {
+                // Allow hiding only if there was a trusted user action very recently.
+                // This prevents auto-refresh (programmatic) code paths from closing the InfoBox.
+                const now = performance.now();
+                const userAllowed = (now - __lastUserIntentTs) <= __USER_INTENT_WINDOW_MS;
+
+                if (!userAllowed) {
+                    // Ignore programmatic hide() calls (e.g., 1-second refresh)
+                    return;
+                }
+
                 const el = ensureInfoEl();
                 el.classList.remove('is-visible');
             }
@@ -762,6 +808,97 @@
             if (!Number.isFinite(t)) return NaN;
             return (nowMs - t) / (365.2425 * 24 * 3600 * 1000);
         }
+                // --- Finnish "ago" formatter for display fields (no DB changes) ---
+        // Converts age in years -> human readable "ago" text + unit selection.
+        function formatAgoFi(ageYears) {
+            const y = Math.max(0, +ageYears || 0); // guard
+
+            const SEC_PER_YEAR = 31557600;
+            const s = y * SEC_PER_YEAR;
+
+            // sub-year ranges by natural units
+            if (s < 90) {
+                const n = Math.round(s);
+                return { value: n, unit: 's', text: `${n} s sitten` };
+            }
+            if (s < 90 * 60) {
+                const n = Math.round(s / 60);
+                return { value: n, unit: 'min', text: `${n} min sitten` };
+            }
+            if (s < 36 * 3600) {
+                const n = Math.round(s / 3600);
+                return { value: n, unit: 'h', text: `${n} h sitten` };
+            }
+            if (s < 90 * 86400) {
+                const n = Math.round(s / 86400);
+                return { value: n, unit: 'd', text: `${n} d sitten` };
+            }
+            if (y < 1.5) {
+                const n = Math.round(y * 12);
+                return { value: n, unit: 'kk', text: `${n} kk sitten` };
+            }
+            if (y < 950) {
+                const n = Math.round(y);
+                return { value: n, unit: 'v', text: `${n} v sitten` };
+            }
+            if (y < 950_000) {
+                const n = Math.round(y / 1_000);
+                // Optionally "ka" for abbreviated scientific style; we keep plain Finnish.
+                return { value: n, unit: 'tuhat v', text: `${n} t. v sitten` };
+            }
+            if (y < 950_000_000) {
+                const raw = y / 1_000_000;
+                const n = (raw < 10) ? Math.round(raw * 10) / 10 : Math.round(raw);
+                return { value: n, unit: 'milj. v', text: `${n} milj. v sitten` };
+            }
+            // billions of years
+            const raw = y / 1_000_000_000;
+            const n = (raw < 10) ? Math.round(raw * 10) / 10 : Math.round(raw);
+            return { value: n, unit: 'mrd v', text: `${n} mrd v sitten` };
+        }
+        // --- Robust year parser (handles number or string; tolerates BCE/eaa forms) ---
+        // Accepts: 2020, "2020", "-27", "−27", "27 BCE", "27 eaa", "563 eKr", etc.
+        // Returns: finite Number (negative for BCE) or NaN if not parseable.
+        function parseYearFlexible(y) {
+            if (typeof y === "number" && Number.isFinite(y)) return y;
+            if (typeof y !== "string") return NaN;
+
+            let s = y.trim().toLowerCase();
+
+            // Normalize Unicode minus/en dash to ASCII hyphen
+            s = s.replace(/[\u2212\u2013\u2014]/g, "-");
+
+            // Detect BCE markers in Finnish/English and flip sign if needed
+            // (eaa = "ennen ajanlaskun alkua"; e.kr. variants; bce)
+            const hasBce = /\b(eaa|e\.?kr|bce)\b/.test(s);
+
+            // Remove non-digit markers/words (keep sign and digits)
+            // e.g. "27 eaa" -> "27", "563 eKr" -> "563"
+            const m = s.match(/^-?\d+(\.\d+)?/);
+            if (!m) return NaN;
+
+            let n = parseFloat(m[0]);
+            if (hasBce && n > 0) n = -n;
+
+            return Number.isFinite(n) ? n : NaN;
+        }
+
+        // Absolute time pretty-print:
+        // - prefer ISO date YYYY-MM-DD if available
+        // - otherwise use a clean year string when sensible
+        function buildDisplayAbs(src) {
+            const y = parseYearFlexible(src?.year);
+            if (Number.isFinite(y)) {
+                // Keep a simple, neutral absolute form (no BCE suffix change now).
+                // If you later want Finnish "eaa" here, we can switch to that.
+                return String(Math.round(y));
+            }
+            if (typeof src?.date === 'string' && src.date.length >= 10) {
+                return src.date.slice(0, 10); // "YYYY-MM-DD"
+            }
+            return '';
+        }
+
         async function prepare() {
             try {
                 // 1) Lataa uusi formaatti (meta + flat events)
@@ -793,31 +930,57 @@
                 const nowDec = decimalYearFromDate(now);
 
                 const baseEvents = (json.events || []).map(src => {
+                    // Prefer 'year' (even if positive) over 'date' for age calculation.
+                    // Accept year both as number and as string (BCE/eaa allowed).
+                    const yearNum = parseYearFlexible(src.year);
+
                     let ageYears = NaN;
-                    if (typeof src.year === "number" && Number.isFinite(src.year)) {
-                        ageYears = nowDec - src.year; // desimaalivuodesta
+                    if (Number.isFinite(yearNum)) {
+                        // From decimal year: nowDec - year
+                        ageYears = nowDec - yearNum;
                     } else if (typeof src.date === "string") {
                         const t = Date.parse(src.date);
-                        if (Number.isFinite(t)) ageYears = (nowMs - t) / (365.2425 * 24 * 3600 * 1000);
+                        if (Number.isFinite(t)) {
+                            ageYears = (nowMs - t) / (365.2425 * 24 * 3600 * 1000);
+                        }
                     }
+
+                    // Drop future events only (ageYears <= 0)
+                    if (!Number.isFinite(ageYears) || ageYears <= 0) return null;
+
                     // jätä tulevaisuus pois (≤ 0)
                     if (!Number.isFinite(ageYears) || ageYears <= 0) return null;
+                    // Compute preformatted Finnish display fields for the renderer
+                    const ago = formatAgoFi(ageYears);
+                    const display_abs = buildDisplayAbs(src);
+                    const display_when = display_abs ? `${display_abs} · ${ago.text}` : ago.text;
 
                     return {
                         theme: src.theme,
                         id: src.id,
                         label: src.label,
-                        display_label: src.label, // säilytä mahdolliselle UI-käytölle
+                        display_label: src.label, // keep for UI
                         year: (typeof src.year === "number") ? src.year : undefined,
                         date: (typeof src.date === "string") ? src.date : undefined,
+
+                        // relative age basis for layout
                         time_years: ageYears,
+
+                        // NEW: pre-formatted display fields (Finnish)
+                        ago_value: ago.value,
+                        ago_unit: ago.unit,
+                        display_ago: ago.text,
+                        display_abs,
+                        display_when,
+
                         author: src.author || "ChatGPT",
                         edit_date: src.edit_date || "2025-10-20",
                         info: src.info,
                         ref: src.ref,
                         language: src.language || meta.language || "fi"
                     };
-                }).filter(Boolean)
+                }
+            ).filter(Boolean)
                     .sort((a, b) => b.time_years - a.time_years);
 
                 // 5) Present-overlayn ankkurit (käytetään jo olemassa olevaa buildPresent()ia)

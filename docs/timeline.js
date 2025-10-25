@@ -479,7 +479,7 @@ let __firstRenderFired = false;
                     .attr("x", 12)
                     .attr("y", yy) // keep data y fixed
                     .style("transform", `translate(0px, ${textOffsetY}px)`)
-                    .text(`${e.display_label || e.label} (${(e.year ?? "").toString()})`);
+                    .text(Util.eventTitleShort(e));
             });
 
             // v42.3 (click-only): open info when clicking an event group or its label
