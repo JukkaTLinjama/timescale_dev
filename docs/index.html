@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v45.8</title>
+        <title>History Timeline v45.9</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v45.8</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v45.9</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -1040,197 +1040,227 @@
             requestAnimationFrame(loop);
         }
 
-        // start after the first render
-        document.addEventListener('timeline:first-render', () => {
-            // do an immediate refresh so colors/positions are correct right away
+        // Start the 1 Hz loop only after the intro animation completes.
+        let __presentLoopStarted = false;
+        function startPresentLoop() {
+            if (__presentLoopStarted) return;
+            __presentLoopStarted = true;
             refreshPresent(new Date());
             requestAnimationFrame(loop);
+        }
+
+        // Primary: wait for intro to finish
+        document.addEventListener('timeline:intro-done', startPresentLoop, { once: true });
+
+        // Fallbacks:
+        //  - If intro is skipped (reduced motion or already shown), start on first render.
+        //  - Also, if intro hasn't finished within 5s after first render, start anyway.
+        document.addEventListener('timeline:first-render', () => {
+            if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                startPresentLoop(); return;
+            }
+            if (sessionStorage.getItem('startup_v41_shown') === '1') {
+                // Intro was already shown this session -> likely skipped now
+                startPresentLoop(); return;
+            }
+            // Otherwise, give the intro up to 5s to complete
+            setTimeout(() => { if (!window.__introCompleted) startPresentLoop(); }, 5000);
         });
 
-        // also refresh immediately after any zoom/scroll re-render (no 1s wait)
+        // Always keep "instant refresh on any render" behavior
         document.addEventListener('timeline:render', () => {
             refreshPresent(new Date());
         });
+        // Late safety: if we somehow missed all events on a super-fast reload,
+        // start the loop after a short grace period when intro is likely done or skipped.
+        setTimeout(() => {
+            if (!__presentLoopStarted) {
+                const reduced = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+                const shown = sessionStorage.getItem('startup_v41_shown') === '1';
+                if (window.__introCompleted || reduced || shown) {
+                    startPresentLoop();
+                }
+            }
+        }, 6000);
     })();
 </script>
 
-    <script>     // Startup animation: ---------------------------------------------------------------------------
+<script>
+    /* Startup animation — simplified v55.9
+       Always runs once after first render.
+       Can be skipped explicitly with ?demo=0.
+    */
+    (function () {
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-        (function(){
-            function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-    // --- Touch cursor helpers (Chrome DevTools -tyylinen pallo) ---
-    function ensureTouchCursor(){
-                let el = document.getElementById('touch-cursor');
-            if(!el){
+        // --- Touch cursor visuals (small white circle + ripple) ---
+        function ensureTouchCursor() {
+            let el = document.getElementById('touch-cursor');
+            if (!el) {
                 el = document.createElement('div');
                 el.id = 'touch-cursor';
-                // inline style backup (jos style.css puuttuu)
                 el.style.cssText = [
-                'position:fixed;width:18px;height:18px;border-radius:50%;',
-                'background:rgba(255,255,255,0.95);',
-                'box-shadow:0 0 0 10px rgba(255,255,255,0.10),0 1px 6px rgba(0,0,0,.35);',
-                'z-index:1700;pointer-events:none;opacity:0;',
-                'transform:translate(-9px,-9px);',
-                'transition:opacity .20s ease,left .60s cubic-bezier(.2,.8,.2,1),top .60s cubic-bezier(.2,.8,.2,1);'
+                    'position:fixed;width:18px;height:18px;border-radius:50%;',
+                    'background:rgba(255,255,255,0.95);',
+                    'box-shadow:0 0 0 10px rgba(255,255,255,0.10),0 1px 6px rgba(0,0,0,.35);',
+                    'z-index:1700;pointer-events:none;opacity:0;',
+                    'transform:translate(-9px,-9px);',
+                    'transition:opacity .20s ease,left .60s cubic-bezier(.2,.8,.2,1),top .60s cubic-bezier(.2,.8,.2,1);'
                 ].join('');
                 document.body.appendChild(el);
             }
-        return el;
+            return el;
         }
 
-        function moveTouchCursor(el, x, y, visible=true){
+        function moveTouchCursor(el, x, y, visible = true) {
             el.style.left = x + 'px';
-        el.style.top  = y + 'px';
-        el.style.opacity = visible ? '1' : '0';
+            el.style.top = y + 'px';
+            el.style.opacity = visible ? '1' : '0';
         }
 
         function moveTouchCursorInstant(el, x, y, visible = true) {
-                const prev = el.style.transition;
-                el.style.transition = 'opacity .20s ease, left 0s, top 0s';
-                el.style.left = x + 'px';
-                el.style.top = y + 'px';
-                el.style.opacity = visible ? '1' : '0';
-                void el.offsetWidth; // force layout so it "jumps"
-                el.style.transition = prev || 'opacity .20s ease,left .60s cubic-bezier(.2,.8,.2,1),top .60s cubic-bezier(.2,.8,.2,1)';
+            const prev = el.style.transition;
+            el.style.transition = 'opacity .20s ease, left 0s, top 0s';
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.opacity = visible ? '1' : '0';
+            void el.offsetWidth;
+            el.style.transition = prev;
         }
 
-        function tapRipple(x,y){
-            // kevyt "pulse" ilman riippuvuutta ulkoisesta CSS:stä
+        function tapRipple(x, y) {
             const r = document.createElement('div');
-                r.style.cssText = [
+            r.style.cssText = [
                 'position:fixed;width:28px;height:28px;border-radius:50%;',
                 'border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(255,255,255,0.45);',
                 'pointer-events:none;z-index:1699;opacity:0.85;',
                 'transform:translate(-14px,-14px) scale(0.6);transition:transform .35s ease, opacity .35s ease;'
-                ].join('');
-                r.style.left = x + 'px';
-                r.style.top  = y + 'px';
-                document.body.appendChild(r);
-            requestAnimationFrame(()=>{
-                    r.style.transform = 'translate(-14px,-14px) scale(1.15)';
+            ].join('');
+            r.style.left = x + 'px';
+            r.style.top = y + 'px';
+            document.body.appendChild(r);
+            requestAnimationFrame(() => {
+                r.style.transform = 'translate(-14px,-14px) scale(1.15)';
                 r.style.opacity = '0';
             });
-            setTimeout(()=>{ if(r.parentNode) r.parentNode.removeChild(r); }, 400);
+            setTimeout(() => { if (r.parentNode) r.parentNode.removeChild(r); }, 400);
         }
 
-        function hideTouchCursor(el){
-            if(!el) return;
-                el.style.opacity = '0';
-            setTimeout(()=>{ if(el.parentNode) el.parentNode.removeChild(el); }, 280);
+        function hideTouchCursor(el) {
+            if (!el) return;
+            el.style.opacity = '0';
+            setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 280);
         }
 
-        // Etsi "ihmiskunta" otsikon ruutu-koordinaatti; fallback = TimelineAPI.getCenter()
-        function findThemeCenter(theme){
-            try{
-            const svg = document.getElementById('timeline');
-                if(!svg) return null;
+        // Find the screen position of a theme label
+        function findThemeCenter(theme) {
+            try {
+                const svg = document.getElementById('timeline');
+                if (!svg) return null;
                 const titles = svg.querySelectorAll('text.card-title');
-                for(const t of titles){
-                if((t.textContent || '').trim().toLowerCase() === String(theme).toLowerCase()){
-                const r = t.getBoundingClientRect();
-                return {x: Math.round(r.left + r.width*0.5), y: Math.round(r.top + r.height*0.5) };
+                for (const t of titles) {
+                    if ((t.textContent || '').trim().toLowerCase() === String(theme).toLowerCase()) {
+                        const r = t.getBoundingClientRect();
+                        return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.5) };
+                    }
                 }
-            }
-            } catch(_){ }
-                return null;
+            } catch (_) { }
+            return null;
         }
 
-        // --- Startup sequence ---
-        // Järjestys: tap "ihmiskunta" → 1s tauko → aloita 50px oikealta → zoom in +50% → out −20% → scroll up + down
-        async function runStartup(){
-        const api = window.TimelineAPI;
-        if (!api) return;
+        // --- Main startup sequence ---
+        async function runStartup() {
+            const api = window.TimelineAPI;
+            if (!api) return;
 
-        let cursor = ensureTouchCursor();
+            let cursor = ensureTouchCursor();
 
-        // 1) Tap-select "ihmiskunta"
-        const cTap = findThemeCenter('ihmiskunta') || api.getCenter();
-        moveTouchCursor(cursor, cTap.x, cTap.y, true);
-        await sleep(520);
-        tapRipple(cTap.x, cTap.y);
-        api.selectTheme('ihmiskunta');
+            // 1) Tap-select the theme whose title is closest to the vertical center (prefocus line)
+            const svg = document.getElementById('timeline');
+            const titles = svg?.querySelectorAll('text.card-title') || [];
+            const midY = window.innerHeight / 2;
 
-        // tauko 1 s (touch irti)
-        moveTouchCursor(cursor, cTap.x, cTap.y, false);
-        await sleep(1000);
+            let nearest = null, bestDist = Infinity;
+            titles.forEach(t => {
+                const r = t.getBoundingClientRect();
+                const cy = r.top + r.height * 0.5;
+                const d = Math.abs(cy - midY);
+                if (d < bestDist) {
+                    bestDist = d;
+                    nearest = { el: t, x: r.left + r.width * 0.5, y: cy, theme: t.textContent.trim() };
+                }
+            });
 
-        // uusi aloitus oikean reunan lähelle
-        const cont = document.getElementById('timeline-container');
-        const r = cont.getBoundingClientRect();
-        const start = { x: Math.round(r.left + r.width * 0.5), y: cTap.y };
-        // tap + ripple uudessa paikassa → käyttäjälle selkeä vihje "aloita täältä"
-        tapRipple(start.x, start.y);
-        await sleep(260);
+            const target = nearest || { x: window.innerWidth / 2, y: midY, theme: null };
 
-        // tuo "sormi" näkyviin suoraan uuteen kohtaan (ei liukua)
-        cursor = ensureTouchCursor();
-        moveTouchCursorInstant(cursor, start.x, start.y, true);
-        await sleep(180);
+            // Visual tap cue
+            moveTouchCursor(cursor, target.x, target.y, true);
+            await sleep(520);
+            tapRipple(target.x, target.y);
 
-        // Zoom (reversed mapping): swipe LEFT = zoom IN, swipe RIGHT = zoom OUT
-        const dx = 120;  // swipe distance
-        const kIn = 1.5;  // +50%
-        const kOut = 0.8;  // −20%
+            // Select the theme if available
+            if (target.theme && api.selectTheme) {
+                api.selectTheme(target.theme);
+            }
 
-        // zoom in — drag LEFT from start to start - dx, anchor at start
-        moveTouchCursor(cursor, start.x - dx, start.y, true);
-        api.animScaleBy(kIn, start.x, start.y, 700);
-        await sleep(740);
+            // Pause shortly (touch released)
+            moveTouchCursor(cursor, target.x, target.y, false);
+            await sleep(1000);
 
-        // zoom out — drag RIGHT back to start, anchor at the left end
-        moveTouchCursor(cursor, start.x, start.y, true);
-        api.animScaleBy(kOut, start.x - dx, start.y, 560);
-        await sleep(600);
+            // 2) Zoom gesture using target as reference
+            const cont = document.getElementById('timeline-container');
+            const r = cont.getBoundingClientRect();
+            const start = { x: Math.round(r.left + r.width * 0.5), y: target.y };
+            tapRipple(start.x, start.y);
+            await sleep(260);
 
-        // 3) Scroll: ylös ja alas samasta start-kohdasta
-        await sleep(500);
-        const dy = -90;
-        moveTouchCursor(cursor, start.x, start.y + dy, true);
-        api.animTranslateBy(0, dy, 620);
-        await sleep(660);
+            cursor = ensureTouchCursor();
+            moveTouchCursorInstant(cursor, start.x, start.y, true);
+            await sleep(180);
 
-        moveTouchCursor(cursor, start.x, start.y, true);
-        api.animTranslateBy(0, -dy, 520);
-        await sleep(540);
+            // Zoom in and out around the target position
+            const dx = 120;
+            api.animScaleBy(1.5, start.x, start.y, 700);
+            moveTouchCursor(cursor, start.x - dx, start.y, true);
+            await sleep(740);
 
-        hideTouchCursor(cursor);
-  }
+            api.animScaleBy(0.8, start.x - dx, start.y, 560);
+            moveTouchCursor(cursor, start.x, start.y, true);
+            await sleep(600);
 
-  // Aja kerran / sessio (ohitus: ?demo=1)
-            // Run only after first render is fully done to avoid scale/extent glitches
-            document.addEventListener('timeline:first-render', () => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            // 3) Scroll up and down
+            await sleep(500);
+            const dy = -90;
+            moveTouchCursor(cursor, start.x, start.y + dy, true);
+            api.animTranslateBy(0, dy, 620);
+            await sleep(660);
 
-        const url = new URL(location.href);
-        const force = url.searchParams.get('demo') === '1';
-        const SS_KEY = 'startup_v41_shown';
+            moveTouchCursor(cursor, start.x, start.y, true);
+            api.animTranslateBy(0, -dy, 520);
+            await sleep(540);
 
-        if (!force) {
-      if (sessionStorage.getItem(SS_KEY) === '1') return;
-        sessionStorage.setItem(SS_KEY, '1');
-    }
-        setTimeout(runStartup, 380);
-        const infoToggle = document.getElementById('info-toggle');
-      const infoBox = document.getElementById('info-box');
+            hideTouchCursor(cursor);
 
-      if (infoToggle && infoBox) {
-          infoToggle.addEventListener('click', async (e) => {
-              // Intercept only the first click on "?" so our sequence runs first.
-              e.preventDefault();
-              e.stopPropagation();
+            // Signal intro completion
+            window.__introCompleted = true;
+            document.dispatchEvent(new CustomEvent('timeline:intro-done'));
+        }
 
-              // Play the same startup animation regardless of session flag
-              await runStartup();
-
-              // Open the info box after animation
-              infoBox.hidden = false;
-              infoBox.style.display = 'block';
-          }, { capture: true, once: true });
-      }
-
-  });
-})();
+        // --- Start logic (simplified) ---
+        document.addEventListener('timeline:first-render', () => {
+            const url = new URL(location.href);
+            const demoParam = url.searchParams.get('demo');
+            const force = demoParam !== '0'; // default: run, unless ?demo=0
+            if (!force) {
+                console.log('[startup] skipped by ?demo=0');
+                window.__introCompleted = true;
+                document.dispatchEvent(new CustomEvent('timeline:intro-done'));
+                return;
+            }
+            console.log('[startup] running intro');
+            setTimeout(runStartup, 380);
+        });
+    })();
 </script>
 
 </body>
