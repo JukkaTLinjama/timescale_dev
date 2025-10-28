@@ -1,4 +1,4 @@
-/* v42 CSS for History Timeline */
+/* v46 CSS for History Timeline */
 :root {
     --bg: #0b0b0c;
     --fg: #e6e6e6;
@@ -172,10 +172,27 @@ body {
     stroke: #bbbaba;
 }
 
-.axis text {
-    fill: #c9c9c9;
-    font-size: 11px;
+/* --- Axis fade via CSS variables (v46.1.2) ---
+   Smooth 5 s fade to grey handled entirely by CSS variables. */
+g.axis {
+    /* default (bright) values */
+    --axis-fill: #c9c9c9;
+    --axis-op: .8;
 }
+
+g.axis text {
+    fill: var(--axis-fill);
+    opacity: var(--axis-op);
+    transition: fill 1s ease, opacity 1s ease;
+    will-change: fill, opacity;
+}
+
+/* Dimmed state: after inactivity */
+g.axis.axis-dim {
+    --axis-fill: #8a8a8a;
+    --axis-op: 0.35;
+}
+
 /* v36: major-tickien viivat selkeämmiksi, mutta hillityt */
 .axis .tick line {
     stroke: #cfcfcf;
@@ -293,12 +310,10 @@ body {
     /* klikkaukset menevät läpi passiivisiin kortteihin */
     transition: opacity .12s ease;
 }
-/* v37: vakiohimmennys korttiryhmille, ei kerry zoomissa */
-.card-group.inactive {
+g.card.inactive {
     opacity: 1 !important;
-    /* estä opasitin kertautuminen */
-    filter: brightness(0.55);
-    /* tasainen tumma, ei riipu zoomista */
+    /* Only the rect will be dimmed */
+    filter: none;
 }
 /* v41: smoother GPU-friendly transition for all card groups */
 .card-group {
@@ -333,8 +348,11 @@ g.card.inactive {
 }
 
 g.card.inactive rect {
+    /* Grey-out towards background: less light & less color */
+    filter: brightness(0.68) saturate(0.60) contrast(0.98);
+
+    /* keep border very subtle */
     fill-opacity: 1;
-    /* prevent double-dimming with fill-opacity */
 }
 
 /* v41: even softer edge for background tier */
@@ -344,18 +362,14 @@ g.card.inactive rect {
     stroke-width: 0.5px;
     filter: none;
 }
-/* v41: fade the border on INACTIVE cards (your CSS uses 'inactive') */
+
 .card-group.inactive g.card rect,
 g.card.inactive rect {
-    /* EN: match container hue and make it extremely subtle so brightness() won't pop it */
+    /* keep a very subtle border; do not override our dim filter */
     stroke: #474646;
-    /* same as #timeline-container background */
-    stroke-opacity: 0.08;
-    /* very low visibility */
+    stroke-opacity: 0.12;
     stroke-width: 0.5px;
-    /* thinner non-scaling edge */
-    filter: none;
-    /* remove local halo on inactive */
+    /* no 'filter' here */
 }
 
 /* v38: estä iOS/Android copy/select/callout aikajanan alueella */

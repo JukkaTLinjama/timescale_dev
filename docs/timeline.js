@@ -1,4 +1,4 @@
-// timeline.js — v45.5 stable (2025-10-21)
+// timeline.js — v46 stable (2025-10-28)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -68,6 +68,27 @@ let __firstRenderFired = false;
     const plotClipRect = plotClip.append("rect").attr("id", "plotClipRect"); // set id for later getBBox()
     // käytä klippausta vain korteille (akseli ja zoom jäävät vapaiksi)
     gCards.attr("clip-path", "url(#plotClip)");
+    // --- one-time fade-right mask (objectBoundingBox → skaalautuu joka kortille) ---
+    const fadeGrad = defs.append("linearGradient")
+        .attr("id", "fadeRight")
+        .attr("gradientUnits", "objectBoundingBox")
+        .attr("x1", 0).attr("y1", 0)
+        .attr("x2", 1).attr("y2", 0);
+
+    fadeGrad.append("stop").attr("offset", "0%").attr("stop-color", "#fff").attr("stop-opacity", 1);   // vasen täysi
+    fadeGrad.append("stop").attr("offset", "85%").attr("stop-color", "#fff").attr("stop-opacity", 0.25); // pehmennys
+    fadeGrad.append("stop").attr("offset", "100%").attr("stop-color", "#fff").attr("stop-opacity", 0);  // oikea läpinäkyvä
+
+    const fadeMask = defs.append("mask")
+        .attr("id", "fadeRightMask")
+        .attr("maskUnits", "objectBoundingBox")
+        .attr("maskContentUnits", "objectBoundingBox")
+        .attr("x", 0).attr("y", 0).attr("width", 1).attr("height", 1);
+
+    // maski on valkoinen→näkyvä vasemmalla, mustuu nollaan oikealla
+    fadeMask.append("rect")
+        .attr("x", 0).attr("y", 0).attr("width", 1).attr("height", 1)
+        .attr("fill", "url(#fadeRight)");
 
     // v36: globaali haalennus ja aktiivikerros
     const gDim = svg.append("g").attr("class", "dim");
@@ -124,6 +145,28 @@ let __firstRenderFired = false;
         const x0 = -padX, y0 = -padY;
         const x1 = w + padX, y1 = h + padY;
         return [[x0, y0], [x1, y1]];
+    }
+    // --- Axis fade control (v46.1.2 using CSS variables) ----------------------
+    let __axisFadeTimer = null;
+
+    function bumpAxisVisibility() {
+        // Cancel previous timer
+        if (__axisFadeTimer) { clearTimeout(__axisFadeTimer); __axisFadeTimer = null; }
+
+        // Step 1 – snap bright immediately
+        const tSel = gAxis.selectAll("text");
+        tSel.style("transition", "none");      // disable transition this frame
+        gAxis.classed("axis-dim", false);      // restore bright variable values
+        const n = gAxis.node(); if (n) { void n.offsetWidth; } // force reflow
+
+        // Step 2 – re-enable transitions and start countdown
+        requestAnimationFrame(() => {
+            tSel.style("transition", null);      // re-enable 5 s transition
+            __axisFadeTimer = setTimeout(() => {
+                // When 1 s of inactivity passes → toggle .axis-dim
+                gAxis.classed("axis-dim", true);
+            }, 300); // EN: was 1000 ms
+        });
     }
 
     // v41: smooth incremental scale around a given screen point (x,y)
@@ -417,7 +460,10 @@ let __firstRenderFired = false;
         const ent = sel.enter().append("g").attr("class", "card");
 
         // kortin rect + otsikko + eventtiryhmä
-        ent.append("rect").attr("rx", 10).attr("ry", 10).attr("filter", "url(#shadow)");
+        ent.append("rect")
+            .attr("rx", 10).attr("ry", 10)
+            .attr("filter", "url(#shadow)")
+            .attr("mask", "url(#fadeRightMask)");
         ent.append("text").attr("class", "card-title").attr("x", 8).style("font-weight", "bold");
         ent.append("g").attr("class", "events");
         sel.exit().remove();
@@ -425,7 +471,11 @@ let __firstRenderFired = false;
 
         sel.merge(ent).each(function (d, i) {
             const g = d3.select(this);
-            const x = (i % 2 === 0 ? 10 : 10 + indent);
+            const LANES = 3;          // kiinteä 3-tasoinen rytmi
+            const gutter = 18;        // vaakasuuntainen askel (px)
+            const lane = i % LANES;   // 0 = left, 1 = center, 2 = right
+            const x = 10 + lane * gutter;
+
             g.attr("transform", `translate(${x},${0})`);
 
             const titleSel = g.select("text.card-title").text(d.theme);
@@ -609,6 +659,8 @@ let __firstRenderFired = false;
 
             // 3) redraw
             onViewportMotion(); // close info when user zooms
+            // EN: brighten axis only on real user input, not on programmatic zooms
+            if (event && event.sourceEvent) bumpAxisVisibility();
             updateZoomIndicator(t);
             applyZoom();
         })
@@ -715,6 +767,7 @@ let __firstRenderFired = false;
         }
         setZOrder();
         requestAnimationFrame(setZOrder);
+        bumpAxisVisibility();  // start fade-out timer after first render
         // v45.5: signal that the very first render is complete and extents are stable
         if (!__firstRenderFired) {
             __firstRenderFired = true;
@@ -773,11 +826,13 @@ let __firstRenderFired = false;
             // 2) DO NOT recomputeDomain or touch scale domains here (prevents jump)
             //    --> keep the current domain + transform
 
-            // 3) redraw using the cached transform
+            // 3) redraw using the cached transform WITHOUT firing a zoom event
             updateZoomIndicator(t);
-            svg.call(zoomBehavior.transform, t);  // re-apply same transform
-            applyZoom();                           // re-render at current transform
+            // IMPORTANT: do not call zoomBehavior.transform(t) here — it fires a zoom event every second.
+            // That interrupts the 5s axis fade.
+            applyZoom();      // redraw with existing transform only
             setZOrder();
+
         };
 
         // notify page scripts that timeline is ready for scripted animation
