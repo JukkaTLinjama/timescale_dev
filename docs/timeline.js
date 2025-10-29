@@ -459,11 +459,20 @@ let __firstRenderFired = false;
         const sel = gCards.selectAll("g.card").data(data, d => d.theme);
         const ent = sel.enter().append("g").attr("class", "card");
 
-        // kortin rect + otsikko + eventtiryhmä
+        // --- two-layer card (no strokes/shadows) ---
+        // A: shadow/base layer (slightly offset)
+        // B: main/front layer (on top). Both share the same fadeRight mask.
+
         ent.append("rect")
+            .attr("class", "cardA")            // base/shadow layer
             .attr("rx", 10).attr("ry", 10)
-            .attr("filter", "url(#shadow)")
             .attr("mask", "url(#fadeRightMask)");
+
+        ent.append("rect")
+            .attr("class", "cardB")            // main/front layer
+            .attr("rx", 10).attr("ry", 10)
+            .attr("mask", "url(#fadeRightMask)");
+
         ent.append("text").attr("class", "card-title").attr("x", 8).style("font-weight", "bold");
         ent.append("g").attr("class", "events");
         sel.exit().remove();
@@ -480,12 +489,23 @@ let __firstRenderFired = false;
 
             const titleSel = g.select("text.card-title").text(d.theme);
             const M = Util.cardMetrics(titleSel, g, d.yTopEv, d.yBotEv, viewH);
+            // Geometry helpers available in your code: M.yRect, M.hRect, w
 
-            g.select("rect")
-                .attr("x", 0).attr("y", M.yRect)
-                .attr("width", w).attr("height", M.hRect)
-                .attr("fill", d.color).attr("fill-opacity", 0.55)
-                .attr("stroke", "#999").attr("stroke-opacity", 0.25);
+            // A) shadow/base layer: subtle down-right offset so it "peeks" through the main layer
+            g.select("rect.cardA")
+                .attr("x", 3.6)           // slight right edge
+                .attr("y", M.yRect - 4.6) // slight up
+                .attr("width", w)
+                .attr("height", M.hRect)
+                .attr("fill", d.color);            // opacity handled in CSS
+
+            // B) main/front layer: no offset
+            g.select("rect.cardB")
+                .attr("x", 0)
+                .attr("y", M.yRect)
+                .attr("width", w)
+                .attr("height", M.hRect)
+                .attr("fill", d.color);            // opacity handled in CSS
 
             g.select("text.card-title")
                 .text(d.theme)
@@ -699,12 +719,6 @@ let __firstRenderFired = false;
             });
             infoBox.addEventListener('click', (e) => e.stopPropagation());
         }
-
-        // varjo filtteri
-        defs.append("filter").attr("id", "shadow")
-            .append("feDropShadow")
-            .attr("dx", -3).attr("dy", 3).attr("stdDeviation", 3)
-            .attr("flood-color", "#000").attr("flood-opacity", 0.25);
 
         // zoom extents
         svg.call(zoomBehavior);

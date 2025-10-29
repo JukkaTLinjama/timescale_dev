@@ -220,24 +220,50 @@ g.axis.axis-dim {
     /* varmistetaan ettei nappaa klikkejä */
 }
 
+/* --- v46.1: flat cards (no border, no shadow) --- */
 g.card rect {
-    /* fill comes from JS (d.color); keep it untouched */
-    stroke: #474646;
-    /* match the timeline container background for better blend */
-    stroke-opacity: 0.35;
-    /* soften the edge to “melt” into background */
-    stroke-width: 1.5px;
+    stroke: none;
     rx: 8;
     ry: 8;
     vector-effect: non-scaling-stroke;
-    transition: fill-opacity .35s ease, stroke-opacity .35s ease, filter .35s ease;
+    transition: fill-opacity .35s ease, filter .35s ease;
 }
-g.card.active rect {
-    fill-opacity: 0.85;
-    /* emphasis without a harsh outline */
-    stroke-opacity: 0.42;
-    /* slightly stronger than passive, still subtle */
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
+
+/* --- v46.1: two-layer cards (no border, no shadow) --- */
+/* Two identical fills with small offset → the bottom layer "shows through" the top. */
+
+g.card rect.cardA,
+g.card rect.cardB {
+    stroke: none;
+    rx: 18;
+    ry: 8;
+    transition: fill-opacity .30s ease, filter .30s ease;
+}
+
+/* v46.1 — per-layer opacity (overrides old rules) */
+g.card rect.cardA {
+    fill-opacity: 0.44;
+}
+
+/* base underlayer: vähän vahvempi */
+g.card rect.cardB {
+    fill-opacity: 0.34;
+}
+
+/* main toplayer: hieman heikompi */
+
+g.card.active rect.cardA {
+    fill-opacity: 0.50;
+}
+
+g.card.active rect.cardB {
+    fill-opacity: 0.40;
+}
+
+/* Inactive: vain värin harmaannus, ei läpinäkyvyyden muutosta */
+g.card.inactive rect.cardA,
+g.card.inactive rect.cardB {
+    filter: brightness(0.68) saturate(0.60) contrast(0.98);
 }
 
 .card-group text {
@@ -350,26 +376,6 @@ g.card.inactive {
 g.card.inactive rect {
     /* Grey-out towards background: less light & less color */
     filter: brightness(0.68) saturate(0.60) contrast(0.98);
-
-    /* keep border very subtle */
-    fill-opacity: 1;
-}
-
-/* v41: even softer edge for background tier */
-.card-group.background g.card rect {
-    stroke-opacity: 0.12;
-    /* EN: strongest fade */
-    stroke-width: 0.5px;
-    filter: none;
-}
-
-.card-group.inactive g.card rect,
-g.card.inactive rect {
-    /* keep a very subtle border; do not override our dim filter */
-    stroke: #474646;
-    stroke-opacity: 0.12;
-    stroke-width: 0.5px;
-    /* no 'filter' here */
 }
 
 /* v38: estä iOS/Android copy/select/callout aikajanan alueella */
