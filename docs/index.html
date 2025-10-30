@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v46.3</title>
+        <title>History Timeline v46.4</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v46.3</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v46.4</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -49,6 +49,27 @@
 
     <div id="timeline-container">
         <svg id="timeline"></svg>
+    </div>
+
+    <!-- v46.4: Inline Event Editor -->
+    <div id="event-editor" hidden>
+        <div class="editor-header">
+            <div class="editor-title">Edit event</div>
+            <button id="close-editor" title="Close editor">×</button>
+        </div>
+        <div class="editor-body">
+            <label>Title</label>
+            <input id="edit-title" type="text">
+
+            <label>Year</label>
+            <input id="edit-year" type="text">
+
+            <label>Description</label>
+            <textarea id="edit-desc" rows="4"></textarea>
+
+            <label>Theme</label>
+            <input id="edit-theme" type="text">
+        </div>
     </div>
 
     <div id="page-footer">© 2025 JL · CC BY 4.0</div>
@@ -272,11 +293,13 @@
                     ? `<div class="body">${comments}</div>`
                     : `<div class="body" style="opacity:.8;">(No notes)</div>`;
 
-                return `
+               return `
                     <div class="title">${label}</div>
                     <div class="meta">${meta}</div>
                     ${body}${link}
-                    <div class="hint">Tip: click outside to close.</div>
+                    <div class="actions">
+                        <button class="edit-event" type="button" aria-label="Edit event">Edit event</button>
+                    </div>
                     `;
             }
 
@@ -288,6 +311,16 @@
 
                 const el = ensureInfoEl();
                 el.innerHTML = buildEventHTML(ev);
+                // Bind "Edit event" button to dispatch a custom event with the event payload.
+                // EN: Consumers (your editor) can listen window.addEventListener('timeline:edit-event', ...)
+                const btn = el.querySelector('.edit-event');
+                if (btn) {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation(); // do not close the popup
+                        window.dispatchEvent(new CustomEvent('timeline:edit-event', { detail: { event: ev } }));
+                    });
+                }
+
                 el.classList.remove('is-visible');
                 // Initial hidden state for animation (fade + small scale)
                 el.style.visibility = 'hidden';
@@ -343,6 +376,43 @@
 
             // Expose public API
             window.InfoBox = { show, hide };
+        })();
+    </script>
+    <script>
+        // v46.4 — Inline Event Editor wiring
+        // EN: Listen for the InfoBox "Edit event" action and populate the editor panel.
+
+        (function () {
+            // Cache editor DOM
+            const editor = document.getElementById('event-editor');
+            const closeBtn = document.getElementById('close-editor');
+            const fTitle = document.getElementById('edit-title');
+            const fYear = document.getElementById('edit-year');
+            const fDesc = document.getElementById('edit-desc');
+            const fTheme = document.getElementById('edit-theme');
+
+            // EN: Open and populate the inline editor
+            function openEditor(ev) {
+                editor.hidden = false;
+                fTitle.value = ev?.display_label || ev?.label || '';
+                // Prefer numeric year; fall back to date string if present
+                fYear.value = (Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date || ''));
+                fDesc.value = ev?.display_comments || ev?.comments || '';
+                fTheme.value = ev?.theme || '';
+                editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+
+            // EN: Close editor
+            function closeEditor() { editor.hidden = true; }
+
+            if (closeBtn) closeBtn.addEventListener('click', closeEditor);
+
+            // EN: Hook the custom event fired by the InfoBox "Edit event" button
+            window.addEventListener('timeline:edit-event', (e) => {
+                const ev = e?.detail?.event;
+                if (!ev) return;
+                openEditor(ev);
+            });
         })();
     </script>
 

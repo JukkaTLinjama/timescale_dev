@@ -559,6 +559,84 @@ text.event-label {
 #event-info a:visited {
     color: #d1b67e;
 }
+#event-info .actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+#event-info .actions .edit-event {
+    font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #666;
+    background: #2a2a2a;
+    color: #ffd399;
+    cursor: pointer;
+}
+
+#event-info .actions .edit-event:hover {
+    background: #333;
+    border-color: #777;
+}
+/* --- v46.4: inline event editor --- */
+#event-editor {
+    position: relative;
+    background: #1b1b1b;
+    border-top: 1px solid #444;
+    padding: 12px;
+    font: 400 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color: #eee;
+}
+
+#event-editor[hidden] {
+    display: none;
+}
+
+#event-editor .editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#event-editor .editor-title {
+    font-weight: 600;
+    color: #ffd399;
+    letter-spacing: 0.5px;
+}
+
+#close-editor {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #999;
+    cursor: pointer;
+}
+
+#close-editor:hover {
+    color: #ffd399;
+}
+
+#event-editor label {
+    display: block;
+    font-size: 12px;
+    margin-top: 6px;
+    color: #aaa;
+}
+
+#event-editor input,
+#event-editor textarea {
+    width: 100%;
+    margin-top: 2px;
+    padding: 5px 6px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #222;
+    color: #eee;
+    font: inherit;
+    resize: vertical;
+}
 
 /* Respect reduced-motion */
 @media (prefers-reduced-motion: reduce) {
