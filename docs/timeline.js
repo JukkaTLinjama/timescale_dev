@@ -168,27 +168,28 @@ let __firstRenderFired = false;
         const x1 = w + padX, y1 = h + padY;
         return [[x0, y0], [x1, y1]];
     }
-    // --- Axis fade control (v46.1.2 using CSS variables) ----------------------
-    let __axisFadeTimer = null;
+    // --- v46.3: mobile-friendly axis fade debounce ---------------------------
+    // EN: Keep axis bright while user interacts; start fade only after idle delay.
+    //     No inline transition toggling/no forced reflow → less jank on mobile.
+
+    let __axisIdleTimer = null;
+    let __lastAxisPoke = 0;
+    const AXIS_IDLE_DELAY_MS = 500;   // try 1000–1200 ms
+    const AXIS_POKE_THROTTLE_MS = 150; // ignore bursts during pinch/scroll
 
     function bumpAxisVisibility() {
-        // Cancel previous timer
-        if (__axisFadeTimer) { clearTimeout(__axisFadeTimer); __axisFadeTimer = null; }
+        const now = performance.now();
+        if (now - __lastAxisPoke < AXIS_POKE_THROTTLE_MS) return; // throttle rapid calls
+        __lastAxisPoke = now;
 
-        // Step 1 – snap bright immediately
-        const tSel = gAxis.selectAll("text");
-        tSel.style("transition", "none");      // disable transition this frame
-        gAxis.classed("axis-dim", false);      // restore bright variable values
-        const n = gAxis.node(); if (n) { void n.offsetWidth; } // force reflow
+        // Keep axis bright immediately on interaction
+        gAxis.classed("axis-dim", false);
 
-        // Step 2 – re-enable transitions and start countdown
-        requestAnimationFrame(() => {
-            tSel.style("transition", null);      // re-enable 5 s transition
-            __axisFadeTimer = setTimeout(() => {
-                // When 1 s of inactivity passes → toggle .axis-dim
-                gAxis.classed("axis-dim", true);
-            }, 300); // EN: was 1000 ms
-        });
+        // Restart the idle timer (fade later, once things are still)
+        if (__axisIdleTimer) clearTimeout(__axisIdleTimer);
+        __axisIdleTimer = setTimeout(() => {
+            gAxis.classed("axis-dim", true);
+        }, AXIS_IDLE_DELAY_MS);
     }
 
     // v41: smooth incremental scale around a given screen point (x,y)
@@ -208,8 +209,9 @@ let __firstRenderFired = false;
         svg.attr("width", state.width).attr("height", state.height);
         const rootTX = cfg.margin.left - 24;                 // sama siirto molemmille
         gRoot.attr("transform", `translate(${rootTX},${cfg.margin.top})`);
-        gActive.attr("transform", `translate(${rootTX},${cfg.margin.top})`); // ← estää “hyppäyksen” vasemmalle
-        // y-skaala: log(time_years): ala=nyky, ylös=menneisyys
+        // EN: Do NOT translate gActive; let it inherit gRoot's transform to avoid double-translate.
+        gActive.attr("transform", null);
+
         const innerH = innerHeight();
         state.yBase = d3.scaleLog().domain([state.minYears, state.maxYears]).range([0, innerH]); // menneisyys alas
         state.y = state.yBase.copy();
@@ -594,17 +596,6 @@ let __firstRenderFired = false;
                         InfoBox.show(evData, fake);
                     }
                 });
-                
-            // --- v46.3: toggle global dim ONCE per render (outside per-card loop) ----
-            // EN: Dim all regular cards if a theme is active; keep axis + active bright.
-            const hasActiveNow = !!state.activeTheme;
-            gDim
-                .transition().duration(180)
-                .attr("opacity", hasActiveNow ? 0.45 : 0.0);
-
-            // Keep final stacking order stable
-            setZOrder();
-
         });
 
         // v40.3: change active only on click (single source of truth = state.activeTheme)
@@ -630,7 +621,14 @@ let __firstRenderFired = false;
                 .filter(d => d.theme === state.activeTheme)
                 .each(function () { gActive.node().appendChild(this); });
         }
+        // --- v46.3: toggle global dim ONCE per render (outside per-card loop) ----
+        // EN: Dim all regular cards if a theme is active; keep axis + active bright.
+        const hasActiveNow = !!state.activeTheme;
+        gDim
+            .transition().duration(180)
+            .attr("opacity", hasActiveNow ? 0.45 : 0.0);
 
+        // Keep final stacking order stable
         setZOrder();         // v40: ensure layer order right after activation change
     }
 
@@ -808,11 +806,6 @@ let __firstRenderFired = false;
         setZOrder();
         requestAnimationFrame(setZOrder);
         bumpAxisVisibility();  // start fade-out timer after first render
-        // v45.5: signal that the very first render is complete and extents are stable
-        if (!__firstRenderFired) {
-            __firstRenderFired = true;
-            document.dispatchEvent(new CustomEvent('timeline:first-render'));
-        }
 
         // v41 API: expose minimal controls for external (index.html) animation
         window.TimelineAPI = {
