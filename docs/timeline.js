@@ -1,4 +1,4 @@
-// timeline.js — v46 stable (2025-10-28)
+// timeline.js — v46 stable (2025-10-30)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -57,11 +57,41 @@ let __firstRenderFired = false;
     const svg = d3.select("#timeline");
     const container = document.getElementById("timeline-container");
 
-    // pää-ryhmät
+    // --- v46.3: main layer setup with global dim layer -------------------------
+    // EN: We define the rendering order explicitly.
+    // Structure:
+    //   svg
+    //    ├── g.root (holds axis, cards, etc.)
+    //    │     ├── g.cards       (all normal cards live here)
+    //    │     ├── rect#dimLayer (dims cards but not axis)
+    //    │     ├── g.active-layer (current active card moved here)
+    //    │     └── g.axis        (axis always stays bright)
+    //    ├── g.zoomBar           (right-side zoom)
+    //    └── overlays / center line etc.
+
     const gRoot = svg.append("g").attr("class", "root");
-    const gAxis = gRoot.append("g").attr("class", "axis");
     const gCards = gRoot.append("g").attr("class", "cards");
+
+    // --- NEW: single global dim rectangle between cards and axis ---
+    const gDim = gRoot.append("rect")
+        .attr("id", "dimLayer")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", 0)                // set later in layout()
+        .attr("height", 0)
+        .attr("fill", "#222")   // dark dim color
+        .attr("opacity", 0)
+        .style("pointer-events", "none");  // EN: do not block clicks
+
+    // --- group for the active card (always above dim) ---
+    const gActive = gRoot.append("g").attr("class", "active-layer");
+
+    // --- axis group (kept last so it stays bright and never dimmed) ---
+    const gAxis = gRoot.append("g").attr("class", "axis");
+
+    // minor grid lines (behind cards)
     const gMinor = gRoot.append("g").attr("class", "minor-grid");
+
     // v37: clip korttialueelle
     const defs = svg.append("defs");
     const plotClip = defs.append("clipPath").attr("id", "plotClip");
@@ -90,14 +120,6 @@ let __firstRenderFired = false;
         .attr("x", 0).attr("y", 0).attr("width", 1).attr("height", 1)
         .attr("fill", "url(#fadeRight)");
 
-    // v36: globaali haalennus ja aktiivikerros
-    const gDim = svg.append("g").attr("class", "dim");
-    const dimRect = gDim.append("rect")
-    .attr("class", "global-dim-rect")
-    .style("pointer-events", "none")  // ei blokkaa klikkejä
-    .style("fill", "#000");           // varmistetaan täyttö    
-    const gActive = svg.append("g").attr("class", "active-layer");        // tänne siirretään aktiivinen kortti
-
     // zoom bar oikealle
     const gZoomTrack = svg.insert("g", ".root").attr("class", "zoomBar"); // v35: tausta alle
     const gZoom = svg.append("g").attr("class", "zoomBar");         // ikkuna + hitbox päälle
@@ -117,12 +139,12 @@ let __firstRenderFired = false;
 
 
     // --- apufunktiot ------------------------------------
+    // --- v46.3: enforce correct layer order (cards → dim → active → axis) ---
     function setZOrder() {
-        gZoomTrack.lower(); // alin: kapea zoombar-tausta
-        gRoot.raise();      // kaikki kortit & akseli (passiivinen sisältö)
-        // gDim.raise();      // ← no need to raise: global overlay stays off
-        gActive.raise();    // aktiivinen kortti overlayn yläpuolelle
-        gAxis.raise();   // v37 fix: akseli + tikit overlayn yläpuolelle
+        gCards.lower();   // 1. regular cards at bottom
+        gDim.raise();     // 2. global dim layer above passive cards
+        gActive.raise();  // 3. active card(s) above dim
+        gAxis.raise();    // 4. axis always on top (never dimmed)
     }
 
     // v44.1 – scale-aware pan bounds using your tuned base (0.6 × h)
@@ -200,19 +222,6 @@ let __firstRenderFired = false;
 
         zoomBG.attr("x", 0).attr("y", 0).attr("width", cfg.zoomBar.width).attr("height", innerH);
         zoomWin.attr("x", 2).attr("width", cfg.zoomBar.width - 4).attr("y", 0).attr("height", innerH - 1);
-        // v40: global dim overlay — covers the content area from the axis gap to the right edge.
-        // It deliberately leaves the left y-axis visible.
-        const axisGap = 2;
-        const contentLeft = rootTX + axisGap;
-        // Use the actual svg width so cards don't get clipped on the right;
-        // keep a tiny 8px padding to the container's border.
-        const contentWidthSVG = Math.max(0, state.width - contentLeft - 8);
-
-        dimRect
-            .attr("x", contentLeft)
-            .attr("y", 0)
-            .attr("width", contentWidthSVG)
-            .attr("height", state.height);
 
         // Update clip to the same visual width but in gCards' local coordinates (origin at 0).
         const clipWidthLocal = Math.max(0, state.width - rootTX - 8);
@@ -221,6 +230,15 @@ let __firstRenderFired = false;
             .attr("y", 0)
             .attr("width", clipWidthLocal)
             .attr("height", innerHeight());
+
+        // --- adjust dim layer so it extends slightly under the axis --------------
+        const axisPad = (state && state.axisWidth) ?? 64;
+        const dimOverlap = 80;   // EN: how many pixels the dim reaches under the axis (left)
+        gDim
+            .attr("x", Math.max(0, axisPad - dimOverlap))      // shift left a bit
+            .attr("y", 0)
+            .attr("width", Math.max(0, state.width - axisPad + dimOverlap))
+            .attr("height", state.height);
 
         setZOrder();  // v35: varmistetaan ettei track koskaan peitä tekstejä
         // alustava zoom-ikkuna = koko alue
@@ -576,9 +594,17 @@ let __firstRenderFired = false;
                         InfoBox.show(evData, fake);
                     }
                 });
-            // v40: ensure correct z-order right after toggling activation.
-            // dim overlay (gDim) must sit above passive cards (gRoot) but below active ones (gActive).
+                
+            // --- v46.3: toggle global dim ONCE per render (outside per-card loop) ----
+            // EN: Dim all regular cards if a theme is active; keep axis + active bright.
+            const hasActiveNow = !!state.activeTheme;
+            gDim
+                .transition().duration(180)
+                .attr("opacity", hasActiveNow ? 0.45 : 0.0);
+
+            // Keep final stacking order stable
             setZOrder();
+
         });
 
         // v40.3: change active only on click (single source of truth = state.activeTheme)

@@ -223,58 +223,52 @@ g.axis.axis-dim {
 /* --- v46.1: flat cards (no border, no shadow) --- */
 g.card rect {
     stroke: none;
-    rx: 8;
+    rx: 4;
     ry: 8;
     vector-effect: non-scaling-stroke;
     transition: fill-opacity .35s ease, filter .35s ease;
 }
 
-/* --- v46.1: two-layer cards (no border, no shadow) --- */
-/* Two identical fills with small offset → the bottom layer "shows through" the top. */
+/* --- v46.3: two-layer cards, flat style (no border, no shadow) --- */
+/* EN: Each card consists of two rects (cardA + cardB).
+   The bottom layer (cardA) is slightly offset; together they form a soft matte edge. */
 
 g.card rect.cardA,
 g.card rect.cardB {
     stroke: none;
-    rx: 18;
-    ry: 8;
-    transition: fill-opacity .30s ease, filter .30s ease;
+    rx: 10;
+    ry: 10;
+    transition: fill-opacity .30s ease;
 }
 
-/* v46.1 — per-layer opacity (overrides old rules) */
+/* EN: Base transparency per layer.
+   Two layers combined give a moderate base color (~1 - (1 - a)^2). */
 g.card rect.cardA {
-    fill-opacity: 0.44;
+    fill-opacity: 0.32;
 }
 
-/* base underlayer: vähän vahvempi */
+/* bottom layer */
 g.card rect.cardB {
-    fill-opacity: 0.34;
+    fill-opacity: 0.28;
 }
 
-/* main toplayer: hieman heikompi */
+/* top layer */
 
+/* EN: Active card has stronger fill-opacity on both layers.
+   Two layers combined ≈ 1 - (1 - 0.60)*(1 - 0.52) ≈ 0.81 total opacity. */
 g.card.active rect.cardA {
-    fill-opacity: 0.50;
+    fill-opacity: 0.60;
 }
 
+/* deeper, richer base */
 g.card.active rect.cardB {
-    fill-opacity: 0.40;
+    fill-opacity: 0.82;
 }
 
-/* Inactive: vain värin harmaannus, ei läpinäkyvyyden muutosta */
-g.card.inactive rect.cardA,
-g.card.inactive rect.cardB {
-    filter: brightness(0.68) saturate(0.60) contrast(0.98);
-}
-
-.card-group text {
-    fill: #c2c0c0;
-    font-size: 10px;
-}
-
-/* v35: vielä pienempi mobiilissa */
+/* v35: font  better mobiilissa */
 @media (max-width: 480px) {
     .card-group text.event-label {
-        font-size: 8px;
+        font-size: 9px;
     }
 }
 
@@ -335,47 +329,6 @@ body {
     pointer-events: none;
     /* klikkaukset menevät läpi passiivisiin kortteihin */
     transition: opacity .12s ease;
-}
-g.card.inactive {
-    opacity: 1 !important;
-    /* Only the rect will be dimmed */
-    filter: none;
-}
-/* v41: smoother GPU-friendly transition for all card groups */
-.card-group {
-    will-change: filter;
-    transition: filter 160ms ease;
-}
-
-/* v41: stronger fog tier for background cards */
-.card-group.background {
-    opacity: 1 !important;
-    /* do not stack opacity */
-    filter: brightness(0.62) saturate(0.90);
-}
-
-/* v41: keep active crisp; rely on filter, not opacity */
-.card-group.active {
-    filter: none;
-    /* crisp, no dimming */
-    isolation: isolate;
-    /* keep on top in stacking contexts */
-}
-
-.card-group.inactive .card {
-    fill-opacity: 1;
-    /* vältetään fill-opacity * filter -kertaantuminen */
-}
-/* v40: Dim only inactive cards; no global wash over empty background */
-g.card.inactive {
-    opacity: 1 !important;
-    /* don't compound with child opacities */
-    filter: brightness(0.55);
-}
-
-g.card.inactive rect {
-    /* Grey-out towards background: less light & less color */
-    filter: brightness(0.68) saturate(0.60) contrast(0.98);
 }
 
 /* v38: estä iOS/Android copy/select/callout aikajanan alueella */
@@ -614,4 +567,9 @@ text.event-label {
     #event-info.is-visible {
         transition: none;
     }
+}
+/* v46.2: global dim layer dims cards and text but not axis */
+#dimLayer {
+    pointer-events: none;
+    transition: opacity .18s ease;
 }
