@@ -637,6 +637,40 @@ text.event-label {
     font: inherit;
     resize: vertical;
 }
+/* v46.4+: editor form layout */
+#event-editor .editor-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+}
+
+#event-editor .editor-body label {
+    grid-column: span 1;
+}
+
+#event-editor .editor-body input,
+#event-editor .editor-body textarea {
+    grid-column: span 1;
+}
+
+/* Long fields spanning both columns */
+#edit-desc,
+#edit-link-url {
+    grid-column: 1 / -1;
+}
+
+/* Mobile: single column */
+@media (max-width: 640px) {
+    #event-editor .editor-body {
+        grid-template-columns: 1fr;
+    }
+
+    #event-editor .editor-body input,
+    #event-editor .editor-body textarea,
+    #event-editor .editor-body label {
+        grid-column: 1 / -1;
+    }
+}
 
 /* Respect reduced-motion */
 @media (prefers-reduced-motion: reduce) {

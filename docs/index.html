@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-        <title>History Timeline v46.4</title>
+        <title>History Timeline v46.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +12,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v46.4</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v46.5</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -69,6 +69,36 @@
 
             <label>Theme</label>
             <input id="edit-theme" type="text">
+            <!-- v46.4+: meta & link fields -->
+            <label>ID</label>
+            <input id="edit-id" type="text" readonly>
+            
+            <label>Date</label>
+            <input id="edit-date" type="text">
+            
+            <label>Link text</label>
+            <input id="edit-link-text" type="text">
+            
+            <label>Link URL</label>
+            <input id="edit-link-url" type="url" placeholder="https://…">
+            
+            <label>Source</label>
+            <input id="edit-source" type="text" placeholder="e.g. Wikipedia, DOI, book…">
+            
+            <label>Tags (comma-separated)</label>
+            <input id="edit-tags" type="text" placeholder="physics, cosmology">
+            
+            <label>Edited by</label>
+            <input id="edit-edited-by" type="text">
+            
+            <label>Edited at</label>
+            <input id="edit-edited-at" type="text" placeholder="ISO or free text">
+            
+            <label>Created by</label>
+            <input id="edit-created-by" type="text">
+            
+            <label>Created at</label>
+            <input id="edit-created-at" type="text" placeholder="ISO or free text">
         </div>
     </div>
 
@@ -379,35 +409,78 @@
         })();
     </script>
     <script>
-        // v46.4 — Inline Event Editor wiring
-        // EN: Listen for the InfoBox "Edit event" action and populate the editor panel.
-
+        // v46.4 — Inline Event Editor wiring (fixed: single IIFE, single openEditor)
         (function () {
             // Cache editor DOM
             const editor = document.getElementById('event-editor');
             const closeBtn = document.getElementById('close-editor');
+
+            // Base fields
             const fTitle = document.getElementById('edit-title');
             const fYear = document.getElementById('edit-year');
             const fDesc = document.getElementById('edit-desc');
             const fTheme = document.getElementById('edit-theme');
 
-            // EN: Open and populate the inline editor
+            // Meta & link fields
+            const fId = document.getElementById('edit-id');
+            const fDate = document.getElementById('edit-date');
+            const fLinkText = document.getElementById('edit-link-text');
+            const fLinkUrl = document.getElementById('edit-link-url');
+            const fSource = document.getElementById('edit-source');
+            const fTags = document.getElementById('edit-tags');
+            const fEditedBy = document.getElementById('edit-edited-by');
+            const fEditedAt = document.getElementById('edit-edited-at');
+            const fCreatedBy = document.getElementById('edit-created-by');
+            const fCreatedAt = document.getElementById('edit-created-at');
+
+            // Helpers
+            const asCSV = (v) => Array.isArray(v) ? v.join(', ') : (v ?? '');
+            const str = (v) => (v == null ? '' : String(v));
+
+            function extractLink(ev) {
+                if (ev.link && typeof ev.link === 'object') {
+                    return {
+                        text: ev.link.text ?? ev.link.label ?? ev.link.title ?? '',
+                        url: ev.link.url ?? ev.link.href ?? ''
+                    };
+                }
+                return {
+                    text: ev.link_text ?? ev.linkLabel ?? ev.linkTitle ?? '',
+                    url: ev.url ?? ev.href ?? ''
+                };
+            }
+
+            // Open + populate the inline editor
             function openEditor(ev) {
+                if (!editor) return;
                 editor.hidden = false;
-                fTitle.value = ev?.display_label || ev?.label || '';
-                // Prefer numeric year; fall back to date string if present
-                fYear.value = (Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date || ''));
-                fDesc.value = ev?.display_comments || ev?.comments || '';
-                fTheme.value = ev?.theme || '';
+
+                // Base
+                fTitle.value = ev?.display_label ?? ev?.label ?? '';
+                fYear.value = (Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? ''));
+                fDesc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
+                fTheme.value = ev?.theme ?? '';
+
+                // Meta
+                fId.value = str(ev?.id ?? ev?._id ?? '');
+                fDate.value = str(ev?.date ?? ev?.iso_date ?? '');
+                const link = extractLink(ev);
+                fLinkText.value = str(link.text);
+                fLinkUrl.value = str(link.url);
+                fSource.value = str(ev?.source ?? ev?.ref ?? ev?.reference ?? '');
+                fTags.value = asCSV(ev?.tags ?? ev?.keywords ?? []);
+                fEditedBy.value = str(ev?.edited_by ?? ev?.editedBy ?? '');
+                fEditedAt.value = str(ev?.edited_at ?? ev?.editedAt ?? '');
+                fCreatedBy.value = str(ev?.created_by ?? ev?.createdBy ?? '');
+                fCreatedAt.value = str(ev?.created_at ?? ev?.createdAt ?? '');
+
                 editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
 
-            // EN: Close editor
-            function closeEditor() { editor.hidden = true; }
-
+            function closeEditor() { if (editor) editor.hidden = true; }
             if (closeBtn) closeBtn.addEventListener('click', closeEditor);
 
-            // EN: Hook the custom event fired by the InfoBox "Edit event" button
+            // Hook the custom event fired by the InfoBox "Edit event" button
             window.addEventListener('timeline:edit-event', (e) => {
                 const ev = e?.detail?.event;
                 if (!ev) return;
