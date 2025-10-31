@@ -22,16 +22,17 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v47</title>
+        <title>History Timeline v47.1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
+
 </head>
 
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v47</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47.1</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -925,8 +926,12 @@
                 const outThemes = Array.from(new Set([...themeOrder, 'present']));
                 const outThemeColors = Object.assign({ present: '#ff8c42' }, themeColors);
 
-                // 7) Julkaise timeline.js:lle
-                window.TS_DATA = { meta, events: merged, themes: outThemes, themeColors: outThemeColors };
+                // 7) Publish for timeline.js — allow editor-owned preview merge
+                const basePack = { meta, events: merged, themes: outThemes, themeColors: outThemeColors };
+                window.TS_DATA = (window.PreviewData && typeof PreviewData.merge === 'function')
+                    ? PreviewData.merge(basePack)
+                    : basePack;
+
                 console.info('[v45.4] TS_DATA prepared:', window.TS_DATA);
 
             } catch (e) {
@@ -940,10 +945,6 @@
         window.TS_DATA_P = prepare();
     })();
 </script>
-
-<!-- modules in files -->
-<script src="editor.js"></script>
-<script src="timeline.js"></script>
 
 
 <script>
@@ -983,6 +984,9 @@
     })();
 </script>
 
+<!-- modules in files -->
+<script src="editor.js"></script>
+<script src="timeline.js"></script>
 </body>
 
 </html>

@@ -99,7 +99,10 @@
       f.year.value = Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? '');
       f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
       f.theme.value = ev?.theme ?? '';
-      f.id.value = str(ev?.id ?? ev?._id ?? '');
+        // Editing starts from a copy: leave ID empty so Save creates a new draft
+        f.id.value = '';
+        // (optional) remember source id for UI hints
+        f.id.dataset.sourceId = str(ev?.id ?? ev?._id ?? '');
       f.date.value = str(ev?.date ?? ev?.iso_date ?? '');
       const link = extractLink(ev);
       f.linkText.value = str(link.text);
@@ -149,6 +152,25 @@
           created_at: f.createdAt.value || undefined
         };
       };
+        // Helper to find currently selected event id
+        function findSelectedEventId() {
+            try {
+                // A) If your editor exposes a selection API
+                if (window.EditorSelection && typeof EditorSelection.getSelectedId === 'function') {
+                    const id = EditorSelection.getSelectedId();
+                    if (id) return id;
+                }
+                // B) Timeline focus (common pattern)
+                if (window.TimelineState && TimelineState.focus && TimelineState.focus.id) {
+                    return TimelineState.focus.id;
+                }
+                // C) DOM fallback: focused/active card
+                const el = document.querySelector('.card.is-focused,[data-focused="true"]');
+                if (el && el.dataset && el.dataset.id) return el.dataset.id;
+            } catch (_) { }
+            return null;
+        }
+
       wrap.appendChild(mk('Save draft', 'Save a new draft in the “Edits” theme', () => {
         StagingStore.add({ ...getData(), id: undefined });
         alert('Draft saved to “Edits”.');
@@ -158,6 +180,25 @@
         StagingStore.update(id, d);
         alert(id ? 'Draft updated.' : 'Draft saved as new (no ID present).');
       }));
+        wrap.appendChild(mk('Duplicate to Preview', 'Duplicate current/selected event into the Preview theme', () => {
+            if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
+                alert('Duplicate feature not available (EditorPreviewOps missing).');
+                return;
+            }
+            // Try selection → then field → then prompt
+            let id = findSelectedEventId() || (f.id?.value || '').trim();
+            if (!id) id = prompt('Enter the ID of the event to duplicate to Preview:');
+            if (!id) return;
+
+            const dup = EditorPreviewOps.duplicateFromEventId(id);
+            if (dup) {
+                console.log('[Duplicate] Created preview draft:', dup);
+                alert(`Duplicated ${id} → ${dup.id} in Preview`);
+            } else {
+                alert('Duplicate failed. Check console for details.');
+            }
+        }));
+
       wrap.appendChild(mk('Clear form', 'Clear all fields', () => {
         editor.querySelectorAll('input, textarea').forEach(el => el.value = '');
       }));
@@ -308,6 +349,186 @@
   });
 })();
 
+/* --- PreviewData: runtime preview cards + merge helper -----------------------
+   - Lives in editor.js so the editor owns all draft/preview concerns.
+   - Exposes: PreviewData.set(list), .clear(), .get(), .merge(basePack)
+   - basePack shape: { meta, events, themes, themeColors }
+-------------------------------------------------------------------------------*/
+(function () {
+    const PREVIEW_THEME = 'preview';
+    const PREVIEW_COLOR = '#f59e0b';
+
+    // Default test card (you can remove/replace via PreviewData.set([...]))
+    let _list = [{
+        id: 'preview-1',
+        theme: PREVIEW_THEME,
+        label: 'Preview — test card',
+        comments: 'A minimal sample event rendered in the Preview theme.',
+        // age in years from "now" → ~6 months
+        time_years: 0.5,
+        previewStatus: 'added',
+        edited_at: new Date().toISOString()
+    }];
+
+    function set(list) { _list = Array.isArray(list) ? list.slice() : []; }
+    function clear() { _list = []; }
+    function get() { return _list.slice(); }
+
+    // Merge preview cards into a ready-to-render pack (no side effects)
+    function merge(base) {
+        const b = base || {};
+        const events = Array.isArray(b.events) ? b.events : [];
+        const themes = Array.isArray(b.themes) ? b.themes : [];
+        const themeColors = { ...(b.themeColors || {}) };
+
+        const out = {
+            meta: b.meta || {},
+            events: events.concat(_list),
+            themes: Array.from(new Set([...themes, PREVIEW_THEME])),
+            themeColors
+        };
+        if (!out.themeColors[PREVIEW_THEME]) out.themeColors[PREVIEW_THEME] = PREVIEW_COLOR;
+        return out;
+    }
+
+    window.PreviewData = { set, clear, get, merge };
+})();
+
+/* --- EditorPreviewOps.duplicateFromEventId -----------------------------------
+   Duplicate an existing event (by id) into the "preview" theme as a new draft.
+   - Keeps timeline.js untouched; only editor.js + PreviewData are used.
+   - Status is always "added" (a new draft), not "edited".
+   Usage:
+     EditorPreviewOps.duplicateFromEventId('orig-1234');
+     // with overrides:
+     EditorPreviewOps.duplicateFromEventId('orig-1234', {
+       label: 'My copy label',
+       time_years: 2.5,
+       comments: 'Tweaked note'
+     });
+-------------------------------------------------------------------------------*/
+(function () {
+    // Defensive helpers
+    function _now() { return new Date(); }
+    function _presentYear() { return _now().getFullYear(); }
+
+    // Convert base event -> numeric time_years if missing
+    function _inferTimeYearsFromBase(base) {
+        if (typeof base.time_years === 'number') return base.time_years;
+        if (typeof base.year === 'number') return Math.max(0, _presentYear() - base.year);
+        if (base.date) {
+            const d = (base.date instanceof Date) ? base.date : new Date(base.date);
+            if (!isNaN(d)) {
+                const DAY_MS = 24 * 60 * 60 * 1000;
+                const YEAR_DAYS = 365.2425;
+                const diffDays = (_now().getTime() - d.getTime()) / DAY_MS;
+                return Math.max(0, diffDays / YEAR_DAYS);
+            }
+        }
+        return 0; // fall back near "now"
+    }
+
+    function _findById(eventId) {
+        const pack = (window.TS_DATA && Array.isArray(TS_DATA.events)) ? TS_DATA : null;
+        return pack ? TS_DATA.events.find(e => e && e.id === eventId) : null;
+    }
+
+    function duplicateFromEventId(eventId, overrides = {}) {
+        if (!eventId) { console.warn('[Duplicate] Missing eventId'); return null; }
+        if (!window.PreviewData || typeof PreviewData.get !== 'function' || typeof PreviewData.set !== 'function') {
+            console.warn('[Duplicate] PreviewData not available (editor.js must load before prepare/timeline).');
+            return null;
+        }
+
+        // 1) Find base event from already-prepared dataset (what timeline.js sees)
+        const pack = (window.TS_DATA && Array.isArray(TS_DATA.events)) ? TS_DATA : null;
+        const base = pack ? TS_DATA.events.find(e => e && e.id === eventId) : null;
+        if (!base) { console.warn('[Duplicate] Base event not found:', eventId); return null; }
+
+        // 2) Build a unique id: baseId(1), baseId(2), ...
+        const baseId = String(base.id || 'orig');
+
+        // Collect existing preview copies that look like baseId(n)
+        const rx = new RegExp('^' + baseId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\((\\d+)\\)$');
+        const previews = PreviewData.get();
+        let maxN = 0;
+        previews.forEach(e => {
+            const m = e && typeof e.id === 'string' ? e.id.match(rx) : null;
+            if (m) { const n = +m[1]; if (Number.isFinite(n) && n > maxN) maxN = n; }
+        });
+
+        // Propose next id, and ensure no collision with TS_DATA.events either
+        let newId = overrides.id || `${baseId}(${maxN + 1})`;
+        const idTaken = (id) =>
+            previews.some(e => e && e.id === id) ||
+            (TS_DATA && Array.isArray(TS_DATA.events) && TS_DATA.events.some(e => e && e.id === id));
+
+        let guard = 0;
+        while (idTaken(newId) && guard++ < 50) {
+            maxN += 1;
+            newId = `${baseId}(${maxN})`;
+        }
+
+        // 3) Derive time_years if missing
+        const tY = (typeof overrides.time_years === 'number')
+            ? overrides.time_years
+            : (typeof base.time_years === 'number')
+                ? base.time_years
+                : (typeof base.year === 'number')
+                    ? Math.max(0, (new Date()).getFullYear() - base.year)
+                    : (function () {
+                        if (base.date) {
+                            const d = (base.date instanceof Date) ? base.date : new Date(base.date);
+                            if (!isNaN(d)) {
+                                const DAY_MS = 86400000, YEAR_DAYS = 365.2425;
+                                return Math.max(0, ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS);
+                            }
+                        }
+                        return 0; // near "now"
+                    })();
+
+        // 4) Build duplicate in preview theme
+        const dup = {
+            id: newId,
+            theme: 'preview',
+            label: overrides.label ?? (base.label ? `${base.label} (copy)` : 'Copy'),
+            comments: overrides.comments ?? (base.comments || ''),
+            time_years: tY,
+            previewStatus: 'added',
+            // provenance (handy for InfoBox / later commit)
+            previewSource: { id: base.id, theme: base.theme || null },
+            // metadata
+            editor: overrides.editor || 'user',
+            edited_at: new Date().toISOString(),
+            // carry optional UI/i18n when useful
+            display: overrides.display ?? base.display ?? undefined,
+            i18n: overrides.i18n ?? base.i18n ?? undefined
+        };
+
+        // 5) Push into PreviewData and try soft re-render
+        const list = PreviewData.get(); list.push(dup); PreviewData.set(list);
+        if (typeof window.rerenderTimeline === 'function') {
+            try { window.rerenderTimeline(); } catch { }
+        } else {
+            console.info('[Duplicate] Draft added to preview. Reload if you do not see it.');
+        }
+
+        return dup;
+    }
+
+    // Extend existing API without clobbering prior helpers
+    window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
+        duplicateFromEventId
+    });
+})();
+
+
+
+
+
+
+// --- B )  InfoBox popup ----------------------------------------------------------
+
 (function () {
   // =================
   // (B) INFOBOX POPUP
@@ -395,6 +616,9 @@
 
   window.InfoBox = { show, hide };
 })();
+
+
+// --- C )  STARTUP INTRO ----------------------------------------------------------
 
 (function () {
   // =================
