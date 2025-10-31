@@ -282,11 +282,6 @@ g.card.active rect.cardB {
             letter-spacing: .1px;
             /* pieni luettavuus-tweak */
 }
-/* v44: smooth neighbor easing for labels (prefocus offset) */
-g.cards text.event-label {
-    transition: transform 160ms ease-out;
-    will-change: transform;
-}
 
 /* optional: respect reduced-motion */
 @media (prefers-reduced-motion: reduce) {
@@ -356,48 +351,6 @@ svg .zoomBar .track,
 svg .zoomBar .window,
 svg .zoomBar .hit {
     pointer-events: none;
-}
-
-/* v41: animation touch cursor (Chrome DevTools -tyylinen) */
-#touch-cursor {
-    position: fixed;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: rgba(252, 170, 63, 0.689);
-    box-shadow:
-        0 0 0 10px rgba(255, 255, 255, 0.10),
-        0 1px 6px rgba(0, 0, 0, .35);
-    z-index: 1700;
-    pointer-events: none;
-    opacity: 0;
-    transform: translate(-9px, -9px);
-    /* keskitys pisteeseen */
-    transition:
-        opacity .50s ease,
-        left .60s cubic-bezier(.2, .8, .2, 1),
-        top .60s cubic-bezier(.2, .8, .2, 1);
-}
-
-.touch-ripple {
-    position: fixed;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.8);
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
-    pointer-events: none;
-    z-index: 1699;
-    opacity: 0.85;
-    transform: translate(-14px, -14px) scale(0.6);
-    animation: ripple-pop .45s ease-out forwards;
-}
-
-@keyframes ripple-pop {
-    to {
-        opacity: 0;
-        transform: translate(-14px, -14px) scale(1.25);
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -659,10 +612,39 @@ text.event-label {
     grid-column: 1 / -1;
 }
 
-/* Mobile: single column */
+/* Mobile: single column + full-screen editor that respects the top header/info */
 @media (max-width: 640px) {
+
+    /* EN: Make the editor a scrollable full-screen panel,
+         but start *below* the fixed header area so page title and "?" stay visible. */
+    #event-editor {
+        position: fixed;
+        left: 0;
+        right: 0;
+
+        /* keep the top bar visible (title + ? info button) */
+        top: calc(env(safe-area-inset-top) + var(--header-h));
+        bottom: 0;
+
+        z-index: 1800;
+        /* under #info-toggle (2000) and #event-info (2200) */
+        margin: 0;
+        width: 100vw;
+        height: auto;
+        /* height defined by top/bottom */
+        max-width: none;
+        border-radius: 0;
+        padding: 10px 12px 14px;
+        overflow: auto;
+        /* scroll inside the editor */
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Collapse form to one column on small screens */
     #event-editor .editor-body {
-        grid-template-columns: 1fr;
+        display: grid;
+        grid-template-columns: 1fr !important;
+        gap: 8px 10px;
     }
 
     #event-editor .editor-body input,
@@ -670,6 +652,39 @@ text.event-label {
     #event-editor .editor-body label {
         grid-column: 1 / -1;
     }
+
+    /* Slightly tighter typography for mobile */
+    #event-editor .editor-body label {
+        font-size: 13px;
+        opacity: .9;
+    }
+
+    #event-editor input,
+    #event-editor textarea,
+    #event-editor select {
+        font-size: 14px;
+    }
+
+    /* Keep action buttons handy */
+    #event-editor .editor-actions {
+        position: sticky;
+        bottom: 0;
+        background: inherit;
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+}
+
+/* EN: The advanced/"More fields" section created by editor.js */
+.advanced-fields[hidden] {
+    display: none !important;
+}
+
+.advanced-fields {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.25);
+    opacity: 0.95;
 }
 
 /* Respect reduced-motion */

@@ -2,8 +2,27 @@
 <html lang="en">
 
 <head>
+    <!--
+    Timeline v47 — file structure (short version)
+    =============================================
+    - index.html        : HTML layout, styles, minimal glue.
+    - style.css         : Styles (cards, InfoBox, editor panel).
+    - editor.js         : Editor module (draft store + inline editor + toolbar)
+                          + InfoBox popup + Startup intro (one file to keep things simple).
+    - timeline.js       : Core renderer (scales, zoom/pan, draw cards/axis, TimelineAPI).
+    
+    Load order:
+      1) d3.js (library)
+      2) editor.js   (provides InfoBox + intro + StagingStore before renderer)
+      3) timeline.js (renderer uses InfoBox, exposes TimelineAPI)
+    
+    Notes:
+      - Skip startup intro with ?demo=0
+      - Editor drafts are kept in localStorage (key: TS_DRAFTS_v47)
+      - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
+    -->
     <meta charset="UTF-8">
-        <title>History Timeline v46.5</title>
+        <title>History Timeline v47</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -12,7 +31,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v46.5</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -260,233 +279,6 @@
 
         // Global timing delays for UI interactions (ms)
         window.TS_DELAY = { ACTIVATE: 1000, ZOOM: 1500 };
-    </script>
-
-    <script>
-        // -----------------------------------------------------------
-        // InfoBox module
-        // Handles the small popup panel showing detailed info about an event.
-        // Encapsulated in an IIFE so it doesn't leak global variables.
-        // Accessible through window.InfoBox.show(event, screenBox)
-        // and window.InfoBox.hide().
-        // -----------------------------------------------------------
-        (function () {
-            const infoCfg = { margin: 10 };  // minimal distance from window edges (px)
-            let infoEl = null;               // singleton DOM element for the popup
-            // --- User intent tracking to keep the InfoBox persistent during programmatic refreshes ---
-            // We only allow hiding the tooltip shortly after a *trusted* user action (click, wheel, key, touch).
-            // All other (programmatic) calls to hide() will be ignored.
-            // This fixes the "tooltip disappears every second" issue without touching timeline.js.
-            let __lastUserIntentTs = 0;
-            const __USER_INTENT_WINDOW_MS = 1200;
-
-            // Capture trusted user interactions very early in the event flow.
-            ['pointerdown', 'wheel', 'keydown', 'touchstart'].forEach((type) => {
-                window.addEventListener(type, (e) => {
-                    if (e && e.isTrusted) {
-                        __lastUserIntentTs = performance.now();
-                    }
-                }, { capture: true, passive: true });
-            });
-
-            // Ensure the info box element exists (lazy creation)
-            function ensureInfoEl() {
-                if (infoEl && infoEl.parentNode) return infoEl;
-                infoEl = document.createElement('div');
-                infoEl.id = 'event-info';
-                document.body.appendChild(infoEl);
-                // Prevent clicks inside the box from bubbling (so it doesn’t close)
-                infoEl.addEventListener('click', e => e.stopPropagation());
-                return infoEl;
-            }
-            // Build inner HTML structure for the info popup based on event data
-            function buildEventHTML(ev) {
-                const label = ev?.display_label || ev?.label || 'Event';
-                // Prefer the precomputed Finnish "when" text
-                const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
-                const meta = [when, ev?.theme ? `Theme: ${ev.theme}` : null]
-                    .filter(Boolean)
-                    .join(' · ');
-
-                // Prefer localized comments prepared by DataUtil; fallback to raw comments
-                const comments = (typeof ev?.display_comments === 'string' && ev.display_comments.trim().length > 0)
-                    ? ev.display_comments.trim()
-                    : ((typeof ev?.comments === 'string') ? ev.comments.trim() : '');
-
-                // Optional reference/link (keep current behavior)
-                const ref = (ev?.ref || '').trim();
-                const link = ref && /^https?:\/\//i.test(ref)
-                    ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
-                    : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
-
-                const body = comments
-                    ? `<div class="body">${comments}</div>`
-                    : `<div class="body" style="opacity:.8;">(No notes)</div>`;
-
-               return `
-                    <div class="title">${label}</div>
-                    <div class="meta">${meta}</div>
-                    ${body}${link}
-                    <div class="actions">
-                        <button class="edit-event" type="button" aria-label="Edit event">Edit event</button>
-                    </div>
-                    `;
-            }
-
-            // Show the info box at a screen position derived from the event’s bounding box
-            function show(ev, screenBox) {
-                // Opening the InfoBox should not be followed by an immediate auto-hide.
-                // Reset user-intent timestamp so programmatic refreshes won't close it.
-                __lastUserIntentTs = 0;
-
-                const el = ensureInfoEl();
-                el.innerHTML = buildEventHTML(ev);
-                // Bind "Edit event" button to dispatch a custom event with the event payload.
-                // EN: Consumers (your editor) can listen window.addEventListener('timeline:edit-event', ...)
-                const btn = el.querySelector('.edit-event');
-                if (btn) {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation(); // do not close the popup
-                        window.dispatchEvent(new CustomEvent('timeline:edit-event', { detail: { event: ev } }));
-                    });
-                }
-
-                el.classList.remove('is-visible');
-                // Initial hidden state for animation (fade + small scale)
-                el.style.visibility = 'hidden';
-                el.style.opacity = '0';
-                el.style.transform = 'translateY(6px) scale(0.98)';
-
-                requestAnimationFrame(() => {
-                    const rect = el.getBoundingClientRect();
-                    const M = infoCfg.margin;
-                    let x = Math.round(screenBox.left + 12);
-                    let y = Math.round(screenBox.top - rect.height - 8);
-
-                    // If it would go offscreen above, move below the event instead
-                    if (y < M) y = Math.round(screenBox.bottom + 8);
-                    // Clamp to right and bottom edges
-                    if (x + rect.width + M > innerWidth)
-                        x = Math.max(M, innerWidth - rect.width - M);
-                    if (y + rect.height + M > innerHeight)
-                        y = Math.max(M, innerHeight - rect.height - M);
-
-                    el.style.left = `${x}px`;
-                    el.style.top = `${y}px`;
-
-                    // Trigger CSS transition to visible state
-                    requestAnimationFrame(() => {
-                        el.style.visibility = '';
-                        el.style.opacity = '';
-                        el.style.transform = '';
-                        el.classList.add('is-visible');
-                    });
-                });
-            }
-
-            // Hide the info box (simply remove visible class)
-            function hide() {
-                // Allow hiding only if there was a trusted user action very recently.
-                // This prevents auto-refresh (programmatic) code paths from closing the InfoBox.
-                const now = performance.now();
-                const userAllowed = (now - __lastUserIntentTs) <= __USER_INTENT_WINDOW_MS;
-
-                if (!userAllowed) {
-                    // Ignore programmatic hide() calls (e.g., 1-second refresh)
-                    return;
-                }
-
-                const el = ensureInfoEl();
-                el.classList.remove('is-visible');
-            }
-
-            // Close on click outside or Escape key
-            document.addEventListener('click', hide);
-            document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
-
-            // Expose public API
-            window.InfoBox = { show, hide };
-        })();
-    </script>
-    <script>
-        // v46.4 — Inline Event Editor wiring (fixed: single IIFE, single openEditor)
-        (function () {
-            // Cache editor DOM
-            const editor = document.getElementById('event-editor');
-            const closeBtn = document.getElementById('close-editor');
-
-            // Base fields
-            const fTitle = document.getElementById('edit-title');
-            const fYear = document.getElementById('edit-year');
-            const fDesc = document.getElementById('edit-desc');
-            const fTheme = document.getElementById('edit-theme');
-
-            // Meta & link fields
-            const fId = document.getElementById('edit-id');
-            const fDate = document.getElementById('edit-date');
-            const fLinkText = document.getElementById('edit-link-text');
-            const fLinkUrl = document.getElementById('edit-link-url');
-            const fSource = document.getElementById('edit-source');
-            const fTags = document.getElementById('edit-tags');
-            const fEditedBy = document.getElementById('edit-edited-by');
-            const fEditedAt = document.getElementById('edit-edited-at');
-            const fCreatedBy = document.getElementById('edit-created-by');
-            const fCreatedAt = document.getElementById('edit-created-at');
-
-            // Helpers
-            const asCSV = (v) => Array.isArray(v) ? v.join(', ') : (v ?? '');
-            const str = (v) => (v == null ? '' : String(v));
-
-            function extractLink(ev) {
-                if (ev.link && typeof ev.link === 'object') {
-                    return {
-                        text: ev.link.text ?? ev.link.label ?? ev.link.title ?? '',
-                        url: ev.link.url ?? ev.link.href ?? ''
-                    };
-                }
-                return {
-                    text: ev.link_text ?? ev.linkLabel ?? ev.linkTitle ?? '',
-                    url: ev.url ?? ev.href ?? ''
-                };
-            }
-
-            // Open + populate the inline editor
-            function openEditor(ev) {
-                if (!editor) return;
-                editor.hidden = false;
-
-                // Base
-                fTitle.value = ev?.display_label ?? ev?.label ?? '';
-                fYear.value = (Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? ''));
-                fDesc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
-                fTheme.value = ev?.theme ?? '';
-
-                // Meta
-                fId.value = str(ev?.id ?? ev?._id ?? '');
-                fDate.value = str(ev?.date ?? ev?.iso_date ?? '');
-                const link = extractLink(ev);
-                fLinkText.value = str(link.text);
-                fLinkUrl.value = str(link.url);
-                fSource.value = str(ev?.source ?? ev?.ref ?? ev?.reference ?? '');
-                fTags.value = asCSV(ev?.tags ?? ev?.keywords ?? []);
-                fEditedBy.value = str(ev?.edited_by ?? ev?.editedBy ?? '');
-                fEditedAt.value = str(ev?.edited_at ?? ev?.editedAt ?? '');
-                fCreatedBy.value = str(ev?.created_by ?? ev?.createdBy ?? '');
-                fCreatedAt.value = str(ev?.created_at ?? ev?.createdAt ?? '');
-
-                editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-
-            function closeEditor() { if (editor) editor.hidden = true; }
-            if (closeBtn) closeBtn.addEventListener('click', closeEditor);
-
-            // Hook the custom event fired by the InfoBox "Edit event" button
-            window.addEventListener('timeline:edit-event', (e) => {
-                const ev = e?.detail?.event;
-                if (!ev) return;
-                openEditor(ev);
-            });
-        })();
     </script>
 
     <script>
@@ -1149,9 +941,10 @@
     })();
 </script>
 
-    <script
-        src="timeline.js"> // ------------------------------ main rendering module  //
-    </script>
+<!-- modules in files -->
+<script src="editor.js"></script>
+<script src="timeline.js"></script>
+
 
 <script>
     /* v45.9 — Present theme live updater (simplified & stable)
@@ -1187,185 +980,6 @@
         document.addEventListener('timeline:intro-done', startPresentLoop, { once: true });
         // Always refresh immediately on any render (zoom or scroll)
         document.addEventListener('timeline:render', () => refreshPresent(new Date()));
-    })();
-</script>
-
-
-<script>
-    /* Startup animation — simplified v55.9
-       Always runs once after first render.
-       Can be skipped explicitly with ?demo=0.
-    */
-    (function () {
-        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-        // --- Touch cursor visuals (small white circle + ripple) ---
-        function ensureTouchCursor() {
-            let el = document.getElementById('touch-cursor');
-            if (!el) {
-                el = document.createElement('div');
-                el.id = 'touch-cursor';
-                el.style.cssText = [
-                    'position:fixed;width:18px;height:18px;border-radius:50%;',
-                    'background:rgba(255,255,255,0.95);',
-                    'box-shadow:0 0 0 10px rgba(255,255,255,0.10),0 1px 6px rgba(0,0,0,.35);',
-                    'z-index:1700;pointer-events:none;opacity:0;',
-                    'transform:translate(-9px,-9px);',
-                    'transition:opacity .20s ease,left .60s cubic-bezier(.2,.8,.2,1),top .60s cubic-bezier(.2,.8,.2,1);'
-                ].join('');
-                document.body.appendChild(el);
-            }
-            return el;
-        }
-
-        function moveTouchCursor(el, x, y, visible = true) {
-            el.style.left = x + 'px';
-            el.style.top = y + 'px';
-            el.style.opacity = visible ? '1' : '0';
-        }
-
-        function moveTouchCursorInstant(el, x, y, visible = true) {
-            const prev = el.style.transition;
-            el.style.transition = 'opacity .20s ease, left 0s, top 0s';
-            el.style.left = x + 'px';
-            el.style.top = y + 'px';
-            el.style.opacity = visible ? '1' : '0';
-            void el.offsetWidth;
-            el.style.transition = prev;
-        }
-
-        function tapRipple(x, y) {
-            const r = document.createElement('div');
-            r.style.cssText = [
-                'position:fixed;width:28px;height:28px;border-radius:50%;',
-                'border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(255,255,255,0.45);',
-                'pointer-events:none;z-index:1699;opacity:0.85;',
-                'transform:translate(-14px,-14px) scale(0.6);transition:transform .35s ease, opacity .35s ease;'
-            ].join('');
-            r.style.left = x + 'px';
-            r.style.top = y + 'px';
-            document.body.appendChild(r);
-            requestAnimationFrame(() => {
-                r.style.transform = 'translate(-14px,-14px) scale(1.15)';
-                r.style.opacity = '0';
-            });
-            setTimeout(() => { if (r.parentNode) r.parentNode.removeChild(r); }, 400);
-        }
-
-        function hideTouchCursor(el) {
-            if (!el) return;
-            el.style.opacity = '0';
-            setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 280);
-        }
-
-        // Find the screen position of a theme label
-        function findThemeCenter(theme) {
-            try {
-                const svg = document.getElementById('timeline');
-                if (!svg) return null;
-                const titles = svg.querySelectorAll('text.card-title');
-                for (const t of titles) {
-                    if ((t.textContent || '').trim().toLowerCase() === String(theme).toLowerCase()) {
-                        const r = t.getBoundingClientRect();
-                        return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.5) };
-                    }
-                }
-            } catch (_) { }
-            return null;
-        }
-
-        // --- Main startup sequence ---
-        async function runStartup() {
-            const api = window.TimelineAPI;
-            if (!api) return;
-
-            let cursor = ensureTouchCursor();
-
-            // 1) Tap-select the theme whose title is closest to the vertical center (prefocus line)
-            const svg = document.getElementById('timeline');
-            const titles = svg?.querySelectorAll('text.card-title') || [];
-            const midY = window.innerHeight / 2;
-
-            let nearest = null, bestDist = Infinity;
-            titles.forEach(t => {
-                const r = t.getBoundingClientRect();
-                const cy = r.top + r.height * 0.5;
-                const d = Math.abs(cy - midY);
-                if (d < bestDist) {
-                    bestDist = d;
-                    nearest = { el: t, x: r.left + r.width * 0.5, y: cy, theme: t.textContent.trim() };
-                }
-            });
-
-            const target = nearest || { x: window.innerWidth / 2, y: midY, theme: null };
-
-            // Visual tap cue
-            moveTouchCursor(cursor, target.x, target.y, true);
-            await sleep(520);
-            tapRipple(target.x, target.y);
-
-            // Select the theme if available
-            if (target.theme && api.selectTheme) {
-                api.selectTheme(target.theme);
-            }
-
-            // Pause shortly (touch released)
-            moveTouchCursor(cursor, target.x, target.y, false);
-            await sleep(1000);
-
-            // 2) Zoom gesture using target as reference
-            const cont = document.getElementById('timeline-container');
-            const r = cont.getBoundingClientRect();
-            const start = { x: Math.round(r.left + r.width * 0.5), y: target.y };
-            tapRipple(start.x, start.y);
-            await sleep(260);
-
-            cursor = ensureTouchCursor();
-            moveTouchCursorInstant(cursor, start.x, start.y, true);
-            await sleep(180);
-
-            // Zoom in and out around the target position
-            const dx = 120;
-            api.animScaleBy(1.5, start.x, start.y, 700);
-            moveTouchCursor(cursor, start.x - dx, start.y, true);
-            await sleep(740);
-
-            api.animScaleBy(0.8, start.x - dx, start.y, 560);
-            moveTouchCursor(cursor, start.x, start.y, true);
-            await sleep(600);
-
-            // 3) Scroll up and down
-            await sleep(500);
-            const dy = -90;
-            moveTouchCursor(cursor, start.x, start.y + dy, true);
-            api.animTranslateBy(0, dy, 620);
-            await sleep(660);
-
-            moveTouchCursor(cursor, start.x, start.y, true);
-            api.animTranslateBy(0, -dy, 520);
-            await sleep(540);
-
-            hideTouchCursor(cursor);
-
-            // Signal intro completion
-            window.__introCompleted = true;
-            document.dispatchEvent(new CustomEvent('timeline:intro-done'));
-        }
-
-        // --- Start logic (simplified) ---
-        document.addEventListener('timeline:first-render', () => {
-            const url = new URL(location.href);
-            const demoParam = url.searchParams.get('demo');
-            const force = demoParam !== '0'; // default: run, unless ?demo=0
-            if (!force) {
-                console.log('[startup] skipped by ?demo=0');
-                window.__introCompleted = true;
-                document.dispatchEvent(new CustomEvent('timeline:intro-done'));
-                return;
-            }
-            console.log('[startup] running intro');
-            setTimeout(runStartup, 380);
-        });
     })();
 </script>
 
