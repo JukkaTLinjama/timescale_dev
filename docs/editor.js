@@ -98,11 +98,31 @@
       f.title.value = ev?.display_label ?? ev?.label ?? '';
       f.year.value = Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? '');
       f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
-      f.theme.value = ev?.theme ?? '';
-        // Editing starts from a copy: leave ID empty so Save creates a new draft
-        f.id.value = '';
-        // (optional) remember source id for UI hints
-        f.id.dataset.sourceId = str(ev?.id ?? ev?._id ?? '');
+        f.theme.value = ev?.theme ?? '';
+
+        // EN: Show source ID for clarity (read-only field in HTML).
+        f.id.value = str(ev?.id ?? ev?._id ?? '');
+        f.id.dataset.sourceId = f.id.value;
+
+        // EN: Auto-create a visible Preview draft once per editor-open.
+        // Uses existing duplicate logic: baseId → baseId(1), (2), ...
+        // Guard so repeated openEditor on same source id won't spam copies.
+        try {
+            const srcId = f.id.dataset.sourceId;
+            if (srcId && (!editor.dataset.previewInitForId || editor.dataset.previewInitForId !== srcId)) {
+                if (window.EditorPreviewOps && typeof EditorPreviewOps.duplicateFromEventId === 'function') {
+                    const dup = EditorPreviewOps.duplicateFromEventId(srcId);
+                    if (dup && dup.id) {
+                        // EN: Remember that we've initialized preview for this source id.
+                        editor.dataset.previewInitForId = srcId;
+                        console.log('[Editor] Auto-preview created:', dup.id);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[Editor] Auto-preview failed:', e);
+        }
+
       f.date.value = str(ev?.date ?? ev?.iso_date ?? '');
       const link = extractLink(ev);
       f.linkText.value = str(link.text);
@@ -118,92 +138,134 @@
     function closeEditor() { editor.hidden = true; }
     if (closeBtn) closeBtn.addEventListener('click', closeEditor);
 
-    function ensureActions() {
-      if (editor.querySelector('.editor-actions')) return;
-      const wrap = document.createElement('div');
-      wrap.className = 'editor-actions';
-      wrap.style.cssText = 'margin-top:10px;display:flex;gap:8px;';
-      const mk = (label, title, fn) => {
-        const b = document.createElement('button');
-        b.type = 'button'; b.textContent = label; b.title = title;
-        b.style.cssText = 'font:600 12px system-ui;padding:6px 10px;border-radius:8px;border:1px solid #666;background:#2a2a2a;color:#ffd399;cursor:pointer;';
-        b.addEventListener('click', fn);
-        b.addEventListener('keyup', (e) => { if (e.key === 'Enter') fn(); });
-        return b;
-      };
-      const getData = () => {
-        const tagsArr = (f.tags.value || '').split(',').map(s => s.trim()).filter(Boolean);
-        const yearNum = Number.isFinite(+f.year.value) ? +f.year.value : undefined;
-        const link = (f.linkText.value || f.linkUrl.value) ? { text: f.linkText.value || undefined, url: f.linkUrl.value || undefined } : undefined;
-        return {
-          id: f.id.value || undefined,
-          label: f.title.value || '(untitled)',
-          display_label: f.title.value || undefined,
-          year: yearNum,
-          date: yearNum ? undefined : (f.year.value || undefined),
-          comments: f.desc.value || undefined,
-          theme: f.theme.value || 'Edits',
-          link,
-          source: f.source.value || undefined,
-          tags: tagsArr,
-          edited_by: f.editedBy.value || undefined,
-          edited_at: f.editedAt.value || undefined,
-          created_by: f.createdBy.value || undefined,
-          created_at: f.createdAt.value || undefined
-        };
-      };
-        // Helper to find currently selected event id
-        function findSelectedEventId() {
-            try {
-                // A) If your editor exposes a selection API
-                if (window.EditorSelection && typeof EditorSelection.getSelectedId === 'function') {
-                    const id = EditorSelection.getSelectedId();
-                    if (id) return id;
-                }
-                // B) Timeline focus (common pattern)
-                if (window.TimelineState && TimelineState.focus && TimelineState.focus.id) {
-                    return TimelineState.focus.id;
-                }
-                // C) DOM fallback: focused/active card
-                const el = document.querySelector('.card.is-focused,[data-focused="true"]');
-                if (el && el.dataset && el.dataset.id) return el.dataset.id;
-            } catch (_) { }
-            return null;
-        }
+      function ensureActions() {
+          // EN: Always ensure the toolbar exists AND lives in the header.
+          // If it already exists, we relocate it to header (do not early-return).
+          let wrap = editor.querySelector('.editor-actions');
+          const header = editor.querySelector('.editor-header') || editor;
+          const closeBtnInHeader = header.querySelector('#close-editor');
 
-      wrap.appendChild(mk('Save draft', 'Save a new draft in the “Edits” theme', () => {
-        StagingStore.add({ ...getData(), id: undefined });
-        alert('Draft saved to “Edits”.');
-      }));
-      wrap.appendChild(mk('Update draft', 'Update an existing draft by ID (or save new if no ID)', () => {
-        const d = getData(); const id = d.id;
-        StagingStore.update(id, d);
-        alert(id ? 'Draft updated.' : 'Draft saved as new (no ID present).');
-      }));
-        wrap.appendChild(mk('Duplicate to Preview', 'Duplicate current/selected event into the Preview theme', () => {
-            if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
-                alert('Duplicate feature not available (EditorPreviewOps missing).');
-                return;
-            }
-            // Try selection → then field → then prompt
-            let id = findSelectedEventId() || (f.id?.value || '').trim();
-            if (!id) id = prompt('Enter the ID of the event to duplicate to Preview:');
-            if (!id) return;
+          if (!wrap) {
+              wrap = document.createElement('div');
+              wrap.className = 'editor-actions';
+              wrap.style.cssText = 'margin-top:10px;display:flex;gap:8px;';
 
-            const dup = EditorPreviewOps.duplicateFromEventId(id);
-            if (dup) {
-                console.log('[Duplicate] Created preview draft:', dup);
-                alert(`Duplicated ${id} → ${dup.id} in Preview`);
-            } else {
-                alert('Duplicate failed. Check console for details.');
-            }
-        }));
+              const mk = (label, title, fn) => {
+                  const b = document.createElement('button');
+                  b.type = 'button'; b.textContent = label; b.title = title;
+                  b.style.cssText = 'font:600 12px system-ui;padding:6px 10px;border-radius:8px;border:1px solid #666;background:#2a2a2a;color:#ffd399;cursor:pointer;';
+                  b.addEventListener('click', fn);
+                  b.addEventListener('keyup', (e) => { if (e.key === 'Enter') fn(); });
+                  return b;
+              };
 
-      wrap.appendChild(mk('Clear form', 'Clear all fields', () => {
-        editor.querySelectorAll('input, textarea').forEach(el => el.value = '');
-      }));
-      editor.appendChild(wrap);
-    }
+              // --- Save draft → visible in Preview theme ---
+              wrap.appendChild(mk('Save draft', 'Save/update a visible draft in the “preview” theme', () => {
+                  if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
+                      alert('Preview save not available (EditorPreviewOps missing).');
+                      return;
+                  }
+                  // Base ID: prefer focus/selection; fallback to sourceId or explicit prompt.
+                  let baseId = (function () {
+                      try { if (window.TimelineState?.focus?.id) return TimelineState.focus.id; } catch { }
+                      const v = (f.id?.dataset?.sourceId || f.id?.value || '').trim();
+                      return v || null;
+                  })();
+                  if (!baseId) baseId = prompt('Enter the ID to use as a base for the Preview draft:');
+                  if (!baseId) return;
+
+                  const form = getData();
+                  const overrides = {
+                      label: form.label,
+                      display_label: form.display_label,
+                      comments: form.comments,
+                      year: form.year,
+                      date: form.date,
+                      link: form.link,
+                      source: form.source,
+                      tags: form.tags,
+                      edited_by: form.edited_by,
+                      edited_at: form.edited_at,
+                      created_by: form.created_by,
+                      created_at: form.created_at,
+                      theme: 'preview'
+                  };
+                  const dup = EditorPreviewOps.duplicateFromEventId(baseId, overrides);
+                  if (dup) {
+                      // remember last created preview id for Delete
+                      editor.dataset.lastDupId = dup.id;
+                      window.rerenderTimeline?.();
+                      alert(`Preview draft saved as ${dup.id}`);
+                  } else {
+                      alert('Preview save failed. See console for details.');
+                  }
+              }));
+
+              // --- Duplicate to Preview ---
+              wrap.appendChild(mk('Duplicate to Preview', 'Duplicate current/selected event into the Preview theme', () => {
+                  if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
+                      alert('Duplicate feature not available (EditorPreviewOps missing).');
+                      return;
+                  }
+                  let id = findSelectedEventId() || (f.id?.value || '').trim();
+                  if (!id) id = prompt('Enter the ID of the event to duplicate to Preview:');
+                  if (!id) return;
+
+                  const dup = EditorPreviewOps.duplicateFromEventId(id);
+                  if (dup) {
+                      editor.dataset.lastDupId = dup.id;
+                      alert(`Duplicated ${id} → ${dup.id} in Preview`);
+                  } else {
+                      alert('Duplicate failed. Check console for details.');
+                  }
+              }));
+
+              // --- Delete draft (Preview) ---
+              wrap.appendChild(mk('Delete draft', 'Remove the last duplicated preview (or choose id)', () => {
+                  let delId = editor.dataset.lastDupId;
+                  if (!delId) delId = prompt('Preview id to delete (e.g. originalId(1) ):', '');
+                  if (!delId) return;
+
+                  if (window.PreviewData?.get && window.PreviewData?.set) {
+                      const list = PreviewData.get();
+                      const next = list.filter(e => e && e.id !== delId);
+                      PreviewData.set(next);
+                      if (editor.dataset.lastDupId === delId) delete editor.dataset.lastDupId;
+                      window.rerenderTimeline?.();
+                      alert(`Deleted preview: ${delId}`);
+                  } else {
+                      alert('PreviewData not available.');
+                  }
+              }));
+
+              // --- Clear form (unchanged) ---
+              wrap.appendChild(mk('Clear form', 'Clear all fields', () => {
+                  editor.querySelectorAll('input, textarea').forEach(el => el.value = '');
+              }));
+          }
+
+          // EN: Relocate toolbar into the header every time.
+          header.style.display = 'flex';
+          header.style.alignItems = 'center';
+          header.style.gap = '8px';
+          wrap.style.marginTop = '0';
+          wrap.style.flex = '0 0 auto';
+
+          const title = header.querySelector('.editor-title');
+          if (title) title.style.flex = '1 1 auto';
+          if (closeBtnInHeader) closeBtnInHeader.style.marginLeft = 'auto';
+
+          if (wrap.parentElement !== header) {
+              // EN: insert only if the reference node (closeBtnInHeader) is really a child of header
+              if (closeBtnInHeader && closeBtnInHeader.parentElement === header) {
+                  header.insertBefore(wrap, closeBtnInHeader);
+              } else {
+                  header.appendChild(wrap);
+              }
+          }
+
+      }
+
     ensureActions();
       // --- (FINAL) Compact mobile layout: main fields visible; meta truly hidden until expanded ---
       function setupAdvancedFields() {
@@ -221,7 +283,11 @@
               adv.className = 'advanced-fields';
               adv.hidden = true; // collapsed by default
               const actions = editor.querySelector('.editor-actions');
-              editor.insertBefore(adv, actions || null);
+              if (actions && actions.parentElement === editor) {
+                  editor.insertBefore(adv, actions);
+              } else {
+                  editor.appendChild(adv);
+              }
           }
 
           // (2) Collect "bits" we will explicitly hide/show (label + control) on mixed rows
@@ -308,7 +374,11 @@
               });
 
               const actions = editor.querySelector('.editor-actions');
-              editor.insertBefore(toggles, actions || null);
+              if (actions && actions.parentElement === editor) {
+                  editor.insertBefore(toggles, actions);
+              } else {
+                  editor.appendChild(toggles);
+              }
               toggles.appendChild(btn);
 
               // Initial state: collapsed (main fields visible, meta hidden)
@@ -325,28 +395,133 @@
     });
   }
 
-  // Floating quick toolbar (small, non-invasive)
-  document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('editor-toolbar')) return;
-    const bar = document.createElement('div');
-    bar.id = 'editor-toolbar';
-    bar.style.cssText = [
-      'position:fixed; right:10px; bottom:26px; z-index:2400; display:flex; gap:6px;',
-      'background:rgba(30,30,30,.85); border:1px solid #555; padding:6px 8px; border-radius:8px;',
-      'font:12px/1 system-ui; color:#ddd;'
-    ].join('');
-    const mkBtn = (txt, fn) => {
-      const b = document.createElement('button');
-      b.textContent = txt;
-      b.style.cssText = 'font:12px system-ui; padding:5px 8px; border-radius:6px; border:1px solid #777; background:#2b2b2b; color:#eee; cursor:pointer;';
-      b.onclick = fn; return b;
-    };
-    bar.appendChild(mkBtn('Show Edits', () => window.TimelineAPI?.selectTheme && TimelineAPI.selectTheme('Edits')));
-    bar.appendChild(mkBtn('Clear', () => { if (confirm('Clear all drafts?')) StagingStore.clear(); }));
-    bar.appendChild(mkBtn('Export drafts', () => StagingStore.exportDraftsJSON()));
-    bar.appendChild(mkBtn('Accept & export', () => StagingStore.exportMerged(window.__BASE_EVENTSDB || null)));
-    document.body.appendChild(bar);
-  });
+    // Floating editor controls (toggleable bottom tray)
+    document.addEventListener('DOMContentLoaded', () => {
+        
+        // EN: Avoid duplicates if already created
+        if (document.getElementById('editor-controls-toggle') || document.getElementById('editor-controls')) return;
+
+        // --- (1) Toggle button in bottom-right corner ---
+        const toggle = document.createElement('button');
+        toggle.id = 'editor-controls-toggle';
+        toggle.textContent = 'Show editor controls';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.style.cssText = [
+            'position:fixed; right:10px; bottom:26px; z-index:2500;',
+            'font:12px system-ui; padding:6px 10px; border-radius:8px;',
+            'border:1px solid #777; background:#2b2b2b; color:#eee; cursor:pointer;'
+        ].join('');
+
+        // --- (2) Bottom tray that holds ALL controls (initially hidden) ---
+        const tray = document.createElement('div');
+        tray.id = 'editor-controls';
+        tray.style.cssText = [
+            'position:fixed; left:10px; right:10px; bottom:26px; z-index:2400;',
+            'display:none; gap:8px; flex-wrap:wrap;',
+            'background:rgba(30,30,30,.92); border:1px solid #555; padding:8px 10px; border-radius:10px;',
+            'box-shadow:0 6px 18px rgba(0,0,0,.35);',
+            'font:12px/1 system-ui; color:#ddd;'
+        ].join('');
+        tray.setAttribute('role', 'region');
+        tray.setAttribute('aria-label', 'Editor controls');
+
+        // Helper for consistent buttons
+        const mkBtn = (txt, fn, title = '') => {
+            const b = document.createElement('button');
+            b.textContent = txt;
+            if (title) b.title = title;
+            b.style.cssText = 'font:12px system-ui; padding:6px 10px; border-radius:8px; border:1px solid #777; background:#3a3a3a; color:#eee; cursor:pointer;';
+            b.onclick = fn;
+            return b;
+        };
+
+        // --- (3) Controls inside the tray ---
+        
+        // Clear all local drafts
+        tray.appendChild(mkBtn('Clear drafts', () => { if (confirm('Clear all local “Edits” drafts?')) StagingStore.clear(); }, 'Delete all local drafts from the Edits store'));
+        // Export drafts JSON
+        tray.appendChild(mkBtn('Export drafts', () => StagingStore.exportDraftsJSON(), 'Download all local drafts as JSON'));
+        // Accept & export merged (base + edits)
+        tray.appendChild(mkBtn('Accept & export', () => StagingStore.exportMerged(window.__BASE_EVENTSDB || null), 'Download merged eventsDB (base + Edits)'));
+
+        // You can add more utilities here later, they’ll automatically show in the tray.
+
+        // --- (4) Toggle behavior ---
+        let __controlsOpen = false; // EN: remember tray state across renders
+        let __previewCard = null;   // EN: cache the <g.card> whose title is "preview"
+
+        function setOpen(open) {
+            __controlsOpen = !!open;
+
+            // Toggle tray UI
+            tray.style.display = open ? 'flex' : 'none';
+            toggle.textContent = open ? 'Hide editor controls' : 'Show editor controls';
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+            // When opening, optionally select the "preview" theme (harmless if already active)
+            if (open && window.TimelineAPI?.selectTheme) {
+                try { TimelineAPI.selectTheme('preview'); } catch (_) { }
+            }
+
+            // Locate the preview card once (and revalidate if DOM changed)
+            if (!__previewCard || !document.contains(__previewCard)) {
+                const svg = document.getElementById('timeline');
+                if (svg) {
+                    __previewCard = null;
+                    svg.querySelectorAll('g.card').forEach(g => {
+                        const t = g.querySelector('text.card-title');
+                        const name = (t?.textContent || '').trim().toLowerCase();
+                        if (name === 'preview') __previewCard = g;
+                    });
+                }
+            }
+
+            // Show/hide the entire preview card group if present
+            if (__previewCard) {
+                if (open) {
+                    __previewCard.style.display = '';
+                    __previewCard.removeAttribute('data-hidden-by-controls');
+                } else {
+                    __previewCard.style.display = 'none';
+                    __previewCard.setAttribute('data-hidden-by-controls', '1');
+                }
+            }
+
+            // Soft redraw (safe no-op if updateTimeline not exposed)
+            if (typeof window.updateTimeline === 'function') {
+                try { window.updateTimeline(); } catch (_) { }
+            }
+        }
+
+        toggle.addEventListener('click', () => setOpen(tray.style.display === 'none'));
+        // EN: Keep preview hidden at startup and after any redraws, unless the tray is open.
+        document.addEventListener('timeline:first-render', () => {
+            if (!__controlsOpen) {
+                // wait a tick to run after DOM has the cards
+                requestAnimationFrame(() => setOpen(false));
+            }
+        });
+
+        // Some builds emit only generic "timeline:render" (or many times).
+        document.addEventListener('timeline:render', () => {
+            if (!__controlsOpen) {
+                requestAnimationFrame(() => setOpen(false));
+            }
+        });
+
+        // --- (5) Mount to DOM ---
+        document.body.appendChild(toggle);
+        document.body.appendChild(tray);
+
+        // Optional: close tray on Escape for quick keyboard control
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && tray.style.display !== 'none') setOpen(false);
+        });
+
+        // Start collapsed by default
+        setOpen(false);
+    });
+
 })();
 
 /* --- PreviewData: runtime preview cards + merge helper -----------------------
@@ -720,4 +895,24 @@
     console.log('[startup] running intro');
     setTimeout(runStartup, 380);
   });
+    // Fallback #1: if first-render never arrives, start on the first generic render.
+    document.addEventListener('timeline:render', () => {
+        if (window.__introCompleted) return;
+        const url = new URL(location.href);
+        if (url.searchParams.get('demo') === '0') return; // respect opt-out
+        console.log('[startup] fallback via timeline:render');
+        setTimeout(runStartup, 180);
+    }, { once: true });
+
+    // Fallback #2: time-based guard in case no custom events are fired at all.
+    setTimeout(() => {
+        if (window.__introCompleted) return;
+        const url = new URL(location.href);
+        if (url.searchParams.get('demo') === '0') return;
+        if (window.TimelineAPI) {
+            console.log('[startup] fallback via timeout');
+            runStartup();
+        }
+    }, 2000);
+
 })();

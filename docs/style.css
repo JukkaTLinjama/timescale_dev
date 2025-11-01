@@ -674,6 +674,44 @@ text.event-label {
         padding-bottom: 8px;
     }
 }
+/* v47.3 – mobile fix: keep Close visible, wrap header buttons cleanly */
+@media (max-width: 640px) {
+
+    /* Header becomes multi-row and reserves space for the close button */
+    #event-editor .editor-header {
+        display: flex;
+        flex-wrap: wrap;
+        /* allow actions to go to a new line */
+        align-items: center;
+        gap: 8px;
+        position: relative;
+        /* anchor for the absolute close button */
+        padding-right: 38px;
+        /* reserve room for the close (×) button */
+    }
+
+    /* Title can expand; keeps layout stable when buttons wrap */
+    #event-editor .editor-header .editor-title {
+        flex: 1 1 auto;
+    }
+
+    /* Actions bar: full-width row under the title, can wrap */
+    #event-editor .editor-header .editor-actions {
+        flex: 1 1 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 4px;
+    }
+
+    /* Close stays in the top-right corner, above the buttons */
+    #close-editor {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        z-index: 10;
+    }
+}
 
 /* EN: The advanced/"More fields" section created by editor.js */
 .advanced-fields[hidden] {

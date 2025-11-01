@@ -3,7 +3,7 @@
 
 <head>
     <!--
-    Timeline v47 — file structure (short version)
+    Timeline v47.2 — file structure (short version)
     =============================================
     - index.html        : HTML layout, styles, minimal glue.
     - style.css         : Styles (cards, InfoBox, editor panel).
@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v47.1</title>
+        <title>History Timeline v47.2   </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v47.1</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47.2</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -927,12 +927,16 @@
                 const outThemeColors = Object.assign({ present: '#ff8c42' }, themeColors);
 
                 // 7) Publish for timeline.js — allow editor-owned preview merge
+                // EN: Keep a copy of the pure base pack to support re-merge after editor changes.
                 const basePack = { meta, events: merged, themes: outThemes, themeColors: outThemeColors };
+                window.__BASE_PACK = basePack;  // <-- store pristine base (without preview drafts)
+
+                // EN: Initial TS_DATA visible at first paint
                 window.TS_DATA = (window.PreviewData && typeof PreviewData.merge === 'function')
                     ? PreviewData.merge(basePack)
                     : basePack;
 
-                console.info('[v45.4] TS_DATA prepared:', window.TS_DATA);
+                console.info('[v47.2] TS_DATA prepared:', window.TS_DATA);
 
             } catch (e) {
                 console.warn('[v45.4] prepare() failed, fallback to present-only:', e);
@@ -944,6 +948,24 @@
         // Promise allows timeline.js to wait if needed
         window.TS_DATA_P = prepare();
     })();
+</script>
+<script>
+    /* EN: Rebuild TS_DATA from the pristine base + current PreviewData drafts, then soft-refresh the timeline. */
+    window.rerenderTimeline = function rerenderTimeline() {
+        try {
+            if (!window.__BASE_PACK) return; // base not ready yet
+            const pack = (window.PreviewData && typeof PreviewData.merge === 'function')
+                ? PreviewData.merge(window.__BASE_PACK)    // base + drafts
+                : window.__BASE_PACK;                      // fallback: base only
+
+            window.TS_DATA = pack;                       // publish
+            if (typeof window.updateTimeline === 'function') {
+                window.updateTimeline();                   // soft re-draw (keeps zoom/scroll)
+            }
+        } catch (err) {
+            console.warn('[rerenderTimeline] failed:', err);
+        }
+    };
 </script>
 
 
