@@ -5,63 +5,54 @@
 //   (C) Startup intro (skippable via ?demo=0)
 //
 // Load order: include this BEFORE timeline.js so InfoBox & intro exist when the renderer starts.
+// Drafts live in PreviewData (_list) and render in the "preview" theme.
+// Local 'StagingStore' is disabled/removed; tray buttons operate on PreviewData.
+
+// === Global helpers: toast + draft label parsers (shared across IIFEs) ===
+(function () {
+    if (!window.DraftUI) window.DraftUI = {};
+
+    window.DraftUI.formatDraftLabel = function formatDraftLabel(origTheme, baseLabel) {
+        const theme = (origTheme && String(origTheme).trim()) || 'unknown';
+        const core = (baseLabel && String(baseLabel).trim()) || 'Untitled';
+        return `draft: ${theme} - ${core}`;
+    };
+    window.DraftUI.stripDraftLabel = function stripDraftLabel(label) {
+        if (typeof label !== 'string') return label;
+        return label.replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+    };
+    window.DraftUI.parseDraftThemeFromLabel = function parseDraftThemeFromLabel(label) {
+        if (typeof label !== 'string') return null;
+        const m = label.match(/^draft:\s*([^-]+)-\s*/i);
+        return m ? m[1].trim() : null;
+    };
+
+    // Tiny toast feedback (global)
+    if (!window.showToast) {
+        window.showToast = function showToast(msg, ms = 1600) {
+            let t = document.getElementById('ts-toast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = 'ts-toast';
+                t.style.cssText = [
+                    'position:fixed; right:14px; bottom:18px; z-index:99999;',
+                    'padding:6px 10px; border-radius:8px; background:#222; color:#fff;',
+                    'box-shadow:0 3px 12px rgba(0,0,0,.45); font:500 13px/1.3 system-ui;',
+                    'opacity:0; transition:opacity .15s ease'
+                ].join('');
+                document.body.appendChild(t);
+            }
+            t.textContent = msg;
+            requestAnimationFrame(() => (t.style.opacity = '1'));
+            setTimeout(() => (t.style.opacity = '0'), ms);
+        };
+    }
+})();
 
 (function () {
   // =========================
   // (A) DRAFT STORAGE + EDIT
   // =========================
-  const LS_KEY = 'TS_DRAFTS_v47';
-
-  function readLS() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); }
-    catch { return []; }
-  }
-  function writeLS(list) { localStorage.setItem(LS_KEY, JSON.stringify(Array.isArray(list) ? list : [])); }
-  function uid() { return 'draft-' + Math.random().toString(36).slice(2, 8); }
-  function normalizeDraft(ev) {
-    const theme = ev.theme || 'Edits';
-    const id = ev.id || uid();
-    const stamp = { __draft: true, __editedAt: new Date().toISOString(), theme };
-    return { id, ...ev, theme, ...stamp };
-  }
-
-  const Store = {
-    list() { return readLS(); },
-    add(ev) { writeLS([...readLS(), normalizeDraft(ev)]); Store._notify(); },
-    update(id, patch) {
-      if (!id) return Store.add(patch);
-      const next = readLS().map(x => x.id === id ? normalizeDraft({ ...x, ...patch }) : x);
-      writeLS(next); Store._notify();
-    },
-    remove(id) { writeLS(readLS().filter(x => x.id !== id)); Store._notify(); },
-    clear() { writeLS([]); Store._notify(); },
-    import(arr) { writeLS((arr || []).map(normalizeDraft)); Store._notify(); },
-    exportDraftsJSON() {
-      const blob = new Blob([JSON.stringify(readLS(), null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href: url, download: 'timeline_drafts_v47.json' });
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    },
-    exportMerged(baseData) {
-      // EN: If no baseData is available yet, export only the Edits group.
-      const drafts = readLS();
-      const merged = (baseData && Array.isArray(baseData.events))
-        ? { ...baseData, events: [...baseData.events, { theme: 'Edits', events: drafts }] }
-        : { events: [{ theme: 'Edits', events: drafts }] };
-
-      const blob = new Blob([JSON.stringify(merged, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href: url, download: 'eventsDB_merged_with_edits_v47.json' });
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    },
-    _notify() {
-      if (window.TimelineAPI?.refreshDrafts) {
-        try { window.TimelineAPI.refreshDrafts(); return; } catch {}
-      }
-      document.dispatchEvent(new CustomEvent('editor:drafts-updated'));
-    }
-  };
-  window.StagingStore = Store; // exposed for external editor UI
 
   // --- Inline editor wiring (uses #event-editor panel if present) ---
   const editor = document.getElementById('event-editor');
@@ -95,6 +86,7 @@
 
     function openEditor(ev) {
       editor.hidden = false;
+        window.__editorOpen = true;
       f.title.value = ev?.display_label ?? ev?.label ?? '';
       f.year.value = Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? '');
       f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
@@ -104,24 +96,28 @@
         f.id.value = str(ev?.id ?? ev?._id ?? '');
         f.id.dataset.sourceId = f.id.value;
 
-        // EN: Auto-create a visible Preview draft once per editor-open.
-        // Uses existing duplicate logic: baseId → baseId(1), (2), ...
-        // Guard so repeated openEditor on same source id won't spam copies.
-        try {
-            const srcId = f.id.dataset.sourceId;
-            if (srcId && (!editor.dataset.previewInitForId || editor.dataset.previewInitForId !== srcId)) {
-                if (window.EditorPreviewOps && typeof EditorPreviewOps.duplicateFromEventId === 'function') {
-                    const dup = EditorPreviewOps.duplicateFromEventId(srcId);
-                    if (dup && dup.id) {
-                        // EN: Remember that we've initialized preview for this source id.
-                        editor.dataset.previewInitForId = srcId;
-                        console.log('[Editor] Auto-preview created:', dup.id);
-                    }
-                }
+        // ---------- Theme badge in editor header: "draft: <theme>" for preview drafts ----------
+        (function ensureThemeBadge() {
+            const header = editor.querySelector('.editor-header') || editor;
+
+            let badge = header.querySelector('#edit-theme-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.id = 'edit-theme-badge';
+                badge.style.cssText = [
+                    'margin-left:8px; padding:2px 6px; border-radius:6px;',
+                    'border:1px solid #555; background:#333; color:#ffcf8a;',
+                    'font:600 11px/1 system-ui; vertical-align:middle;'
+                ].join('');
+                const titleEl = header.querySelector('h3, .editor-title, #edit-title') || header.firstChild;
+                if (titleEl && titleEl.nextSibling) header.insertBefore(badge, titleEl.nextSibling);
+                else header.appendChild(badge);
             }
-        } catch (e) {
-            console.warn('[Editor] Auto-preview failed:', e);
-        }
+
+            const isPreview = ev?.theme === 'preview';
+            const orig = ev?.previewOriginalTheme || ev?.previewSource?.theme || DraftUI.parseDraftThemeFromLabel(ev?.label) || '';
+            badge.textContent = isPreview && orig ? `Theme: draft: ${orig}` : `Theme: ${ev?.theme || '—'}`;
+        })();
 
       f.date.value = str(ev?.date ?? ev?.iso_date ?? '');
       const link = extractLink(ev);
@@ -135,8 +131,53 @@
       f.createdAt.value = str(ev?.created_at ?? ev?.createdAt ?? '');
       editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    function closeEditor() { editor.hidden = true; }
-    if (closeBtn) closeBtn.addEventListener('click', closeEditor);
+
+      function closeEditor() { editor.hidden = true; window.__editorOpen = false; }
+        if (closeBtn) closeBtn.addEventListener('click', closeEditor);
+      // EN: Close the inline editor with Escape, if the panel is visible.
+      document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && editor && !editor.hidden) {
+              closeEditor();
+          }
+      });
+
+      // Selected event id from renderer, fallback to editor field
+      function findSelectedEventId() {
+          try { if (window.TimelineState?.focus?.id) return TimelineState.focus.id; } catch { }
+          const v = (f.id?.dataset?.sourceId || f.id?.value || '').trim();
+          return v || null;
+      }
+
+      // Collect form data (minimal set you need for overrides)
+      function getData() {
+          const label = (f.title?.value || '').trim();
+          const comments = (f.desc?.value || '').trim();
+          const yearStr = (f.year?.value || '').trim();
+          const yearNum = /^\d+$/.test(yearStr) ? Number(yearStr) : undefined;
+          const date = (f.date?.value || '').trim();
+          const link = { text: (f.linkText?.value || '').trim(), url: (f.linkUrl?.value || '').trim() };
+          const source = (f.source?.value || '').trim();
+          const tags = (f.tags?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+          const edited_by = (f.editedBy?.value || '').trim();
+          const edited_at = (f.editedAt?.value || '').trim();
+          const created_by = (f.createdBy?.value || '').trim();
+          const created_at = (f.createdAt?.value || '').trim();
+
+          return {
+              label,
+              display_label: label,
+              comments,
+              year: yearNum,
+              date,
+              link,
+              source,
+              tags,
+              edited_by,
+              edited_at,
+              created_by,
+              created_at
+          };
+      }
 
       function ensureActions() {
           // EN: Always ensure the toolbar exists AND lives in the header.
@@ -195,7 +236,7 @@
                       // remember last created preview id for Delete
                       editor.dataset.lastDupId = dup.id;
                       window.rerenderTimeline?.();
-                      alert(`Preview draft saved as ${dup.id}`);
+                      showToast(`Draft saved: ${dup.label}`);
                   } else {
                       alert('Preview save failed. See console for details.');
                   }
@@ -214,7 +255,7 @@
                   const dup = EditorPreviewOps.duplicateFromEventId(id);
                   if (dup) {
                       editor.dataset.lastDupId = dup.id;
-                      alert(`Duplicated ${id} → ${dup.id} in Preview`);
+                      showToast(`Duplicated: ${dup.label}`);
                   } else {
                       alert('Duplicate failed. Check console for details.');
                   }
@@ -232,7 +273,7 @@
                       PreviewData.set(next);
                       if (editor.dataset.lastDupId === delId) delete editor.dataset.lastDupId;
                       window.rerenderTimeline?.();
-                      alert(`Deleted preview: ${delId}`);
+                      showToast(`Deleted draft: ${delId}`);
                   } else {
                       alert('PreviewData not available.');
                   }
@@ -437,14 +478,38 @@
 
         // --- (3) Controls inside the tray ---
         
-        // Clear all local drafts
-        tray.appendChild(mkBtn('Clear drafts', () => { if (confirm('Clear all local “Edits” drafts?')) StagingStore.clear(); }, 'Delete all local drafts from the Edits store'));
-        // Export drafts JSON
-        tray.appendChild(mkBtn('Export drafts', () => StagingStore.exportDraftsJSON(), 'Download all local drafts as JSON'));
-        // Accept & export merged (base + edits)
-        tray.appendChild(mkBtn('Accept & export', () => StagingStore.exportMerged(window.__BASE_EVENTSDB || null), 'Download merged eventsDB (base + Edits)'));
+        // Clear all preview drafts
+        tray.appendChild(mkBtn('Clear drafts', () => {
+            if (!window.PreviewData?.clear) return showToast('PreviewData not ready');
+            if (confirm('Clear all preview drafts?')) {
+                PreviewData.clear();
+                window.rerenderTimeline?.();
+                showToast('Cleared all preview drafts');
+            }
+        }, 'Delete all drafts from the Preview card'));
 
-        // You can add more utilities here later, they’ll automatically show in the tray.
+        // Export drafts (preview only)
+        tray.appendChild(mkBtn('Export drafts', () => {
+            if (!window.PreviewData?.get) return showToast('PreviewData not ready');
+            const drafts = PreviewData.get();
+            const blob = new Blob([JSON.stringify(drafts, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = Object.assign(document.createElement('a'), { href: url, download: 'preview_drafts.json' });
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, 'Download all preview drafts as JSON'));
+
+        // Accept & export (base + converted drafts)
+        tray.appendChild(mkBtn('Accept & export', () => {
+            if (!window.ExportOps?.buildExportJSON) return showToast('ExportOps not ready');
+            const basePack = window.__BASE_EVENTSDB || window.TS_DATA || {};
+            const pack = ExportOps.buildExportJSON(basePack);
+            const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = Object.assign(document.createElement('a'), { href: url, download: 'eventsDB_with_preview_finals.json' });
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, 'Download merged eventsDB (base + preview drafts converted to finals)'));
 
         // --- (4) Toggle behavior ---
         let __controlsOpen = false; // EN: remember tray state across renders
@@ -487,13 +552,9 @@
                 }
             }
 
-            // Soft redraw (safe no-op if updateTimeline not exposed)
-            if (typeof window.updateTimeline === 'function') {
-                try { window.updateTimeline(); } catch (_) { }
-            }
         }
 
-        toggle.addEventListener('click', () => setOpen(tray.style.display === 'none'));
+        toggle.addEventListener('click', () => setOpen(!__controlsOpen));
         // EN: Keep preview hidden at startup and after any redraws, unless the tray is open.
         document.addEventListener('timeline:first-render', () => {
             if (!__controlsOpen) {
@@ -504,9 +565,7 @@
 
         // Some builds emit only generic "timeline:render" (or many times).
         document.addEventListener('timeline:render', () => {
-            if (!__controlsOpen) {
-                requestAnimationFrame(() => setOpen(false));
-            }
+            requestAnimationFrame(() => setOpen(__controlsOpen));
         });
 
         // --- (5) Mount to DOM ---
@@ -515,7 +574,11 @@
 
         // Optional: close tray on Escape for quick keyboard control
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && tray.style.display !== 'none') setOpen(false);
+            if (e.key !== 'Escape') return;
+            // If editor is open, let the editor's ESC handler take precedence.
+            if (window.__editorOpen) return;
+            // Otherwise, close the tray if it's open.
+            if (__controlsOpen) setOpen(false);
         });
 
         // Start collapsed by default
@@ -545,6 +608,13 @@
         edited_at: new Date().toISOString()
     }];
 
+    // --- Draft label helpers (for consistent "draft: theme - label") ---
+    function formatDraftLabel(origTheme, baseLabel) {
+        const theme = (origTheme && String(origTheme).trim()) || 'unknown';
+        const core = (baseLabel && String(baseLabel).trim()) || 'Untitled';
+        return `draft: ${theme} - ${core}`;
+    }
+
     function set(list) { _list = Array.isArray(list) ? list.slice() : []; }
     function clear() { _list = []; }
     function get() { return _list.slice(); }
@@ -567,6 +637,7 @@
     }
 
     window.PreviewData = { set, clear, get, merge };
+    
 })();
 
 /* --- EditorPreviewOps.duplicateFromEventId -----------------------------------
@@ -662,26 +733,35 @@
                         return 0; // near "now"
                     })();
 
-        // 4) Build duplicate in preview theme
+        // 4) Build duplicate as a PREVIEW draft (single preview card),
+        //    but embed the original theme visibly into the label prefix.
+        //    Also store original theme in metadata for reliable export.
+        const origTheme = base.theme || null;
+
+        const userLabel = (overrides.label != null && overrides.label !== '')
+            ? String(overrides.label)
+            : (base.label ? `${base.label} (copy)` : 'Copy');
+
+        // Final label shown in the preview card
+        const previewLabel = DraftUI.formatDraftLabel(origTheme, userLabel);
         const dup = {
             id: newId,
-            theme: 'preview',
-            label: overrides.label ?? (base.label ? `${base.label} (copy)` : 'Copy'),
+            theme: 'preview',                    // stays in preview for visualization
+            label: previewLabel,                 // "draft: <theme> - <label>"
             comments: overrides.comments ?? (base.comments || ''),
             time_years: tY,
             previewStatus: 'added',
-            // provenance (handy for InfoBox / later commit)
-            previewSource: { id: base.id, theme: base.theme || null },
-            // metadata
+            previewSource: { id: base.id, theme: origTheme },
+            previewOriginalTheme: origTheme,     // used when exporting/committing
             editor: overrides.editor || 'user',
             edited_at: new Date().toISOString(),
-            // carry optional UI/i18n when useful
             display: overrides.display ?? base.display ?? undefined,
             i18n: overrides.i18n ?? base.i18n ?? undefined
         };
 
         // 5) Push into PreviewData and try soft re-render
         const list = PreviewData.get(); list.push(dup); PreviewData.set(list);
+        showToast(`Added to Preview: ${dup.label}`);
         if (typeof window.rerenderTimeline === 'function') {
             try { window.rerenderTimeline(); } catch { }
         } else {
