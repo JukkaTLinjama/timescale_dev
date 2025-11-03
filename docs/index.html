@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v47.3   </title>
+        <title>History Timeline v47.4   </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v47.3</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47.4</span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -949,6 +949,7 @@
         window.TS_DATA_P = prepare();
     })();
 </script>
+
 <script>
     /* EN: Rebuild TS_DATA from the pristine base + current PreviewData drafts, then soft-refresh the timeline. */
     window.rerenderTimeline = function rerenderTimeline() {
@@ -968,6 +969,125 @@
     };
 </script>
 
+<script>
+    /* PrefocusInfo — armed-after-motion model (v47.6)
+       - Opens only if:
+         1) not disabled, AND
+         2) "armed" (i.e., there was viewport motion and it has settled for ARM_QUIET_MS)
+       - Any UI click outside the SVG should disarm (added in block #2).
+    */
+    (function () {
+        const OPEN_DELAY_MS = 600;       // dwell before opening in prefocus
+        const REOPEN_DELAY_MS = 900;     // min time between openings
+        const ARM_QUIET_MS = 350;        // quiet time after motion before we arm
+
+        let dwellTimer = null;
+        let armTimer = null;
+
+        let armed = false;               // becomes true only after viewport motion settles
+        let disabled = false;            // set true while help panel (or other modal) is open
+        let lastKey = null;
+        let lastOpenAt = 0;
+
+        function cancel() {
+            if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; }
+        }
+
+        function disarm() {
+            armed = false;                 // require fresh motion before any next popup
+            cancel();
+            if (window.InfoBox && InfoBox.hide) InfoBox.hide();
+        }
+
+        function setDisabled(on) {
+            disabled = !!on;
+            if (disabled) disarm();
+        }
+
+        // Called repeatedly by timeline.js during/after zoom/pan renders
+        function onViewportMotion() {
+            // Any motion cancels dwell and disarms immediately.
+            cancel();
+            if (window.InfoBox) InfoBox.hide();
+            armed = false;
+
+            // Re-arm only after motion has been quiet for ARM_QUIET_MS
+            if (armTimer) clearTimeout(armTimer);
+            armTimer = setTimeout(() => { armed = true; }, ARM_QUIET_MS);
+        }
+
+        // Called by timeline.js after each render with the current prefocus key
+        // resolver() => { box: DOMRect, data: eventObj } or null
+        function onPrefocus(key, resolver) {
+            // If disabled or not armed yet, ignore silently
+            if (disabled || !armed) return;
+
+            // Focus left → cancel any pending dwell + hide
+            if (!key) { cancel(); if (window.InfoBox) InfoBox.hide(); lastKey = null; return; }
+
+            // Same target & already waiting → do nothing
+            if (key === lastKey && dwellTimer) return;
+
+            cancel();
+            lastKey = key;
+            const now = performance.now();
+            const wait = Math.max(OPEN_DELAY_MS, (lastOpenAt + REOPEN_DELAY_MS) - now);
+
+            dwellTimer = setTimeout(() => {
+                dwellTimer = null;
+                try {
+                    const r = (typeof resolver === 'function') ? resolver() : null;
+                    if (!r || !r.box || !r.data) return;
+                    if (window.InfoBox && InfoBox.show) {
+                        InfoBox.show(r.data, r.box);
+                        lastOpenAt = performance.now();
+                    }
+                } catch { }
+            }, wait);
+        }
+
+        window.PrefocusInfo = { onPrefocus, onViewportMotion, cancel, disarm, setDisabled };
+    })();
+</script>
+
+<script>
+    /* Info toggle — disable PrefocusInfo while help panel is open (v47.6) */
+    (function () {
+        const btn = document.getElementById("info-toggle");
+        const panel = document.getElementById("info-box");
+        let helpActive = false;
+
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            helpActive = !helpActive;
+            panel.style.display = helpActive ? "block" : "none";
+
+            // Close any open event info and fully disarm prefocus
+            if (window.PrefocusInfo) {
+                PrefocusInfo.setDisabled(helpActive);  // while help is open, prefocus is disabled
+                PrefocusInfo.disarm();                 // require fresh viewport motion later
+            }
+            if (window.InfoBox && InfoBox.hide) InfoBox.hide();
+
+            btn.classList.toggle("active", helpActive);
+        });
+
+        // Defensive: if a render happens while help is open, keep InfoBox hidden
+        document.addEventListener("timeline:render", () => {
+            if (helpActive && window.InfoBox) InfoBox.hide();
+        });
+
+        // Global UI disarm:
+        // Any click OUTSIDE the SVG timeline disarms prefocus (so buttons/controls won't trigger popups).
+        document.addEventListener("click", (ev) => {
+            const svg = document.getElementById("timeline");
+            if (!svg || svg.contains(ev.target)) return; // clicks inside svg are okay
+            if (window.PrefocusInfo) PrefocusInfo.disarm();
+        }, true);
+    })();
+</script>
 
 <script>
     /* v45.9 — Present theme live updater (simplified & stable)

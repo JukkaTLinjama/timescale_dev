@@ -36,6 +36,8 @@ let __firstRenderFired = false;
 
 (() => {
     const cfg = (window.TS_CFG || {});
+    // Disable built-in info toggle; handled externally in index.html
+    const DISABLE_INTERNAL_INFO_TOGGLE = true;
     const ACTIVATE_DELAY = (window.TS_DELAY && TS_DELAY.ACTIVATE) || 1000;
     const ZOOM_DELAY = (window.TS_DELAY && TS_DELAY.ZOOM) || 1500;
 
@@ -198,7 +200,13 @@ let __firstRenderFired = false;
         selection.call(zoomBehavior.scaleBy, factor, [x, y]);
     }
     function onViewportMotion() {
+        // Close any visible InfoBox immediately on motion
         if (window.InfoBox && InfoBox.hide) InfoBox.hide();
+
+        // Notify PrefocusInfo that motion occurred (so it can arm after idle)
+        if (window.PrefocusInfo && typeof PrefocusInfo.onViewportMotion === "function") {
+            PrefocusInfo.onViewportMotion();
+        }
     }
 
     function layout() {
@@ -573,29 +581,29 @@ let __firstRenderFired = false;
             });
 
             // v42.3 (click-only): open info when clicking an event group or its label
-            evSel.merge(evEnt)
-                .on('click', function (d3evt, evData) {
-                    // Prevent card activation handlers and background close from firing
-                    d3evt.preventDefault();
-                    d3evt.stopPropagation();
+            // evSel.merge(evEnt)
+            //     .on('click', function (d3evt, evData) {
+            //         // Prevent card activation handlers and background close from firing
+            //         d3evt.preventDefault();
+            //         d3evt.stopPropagation();
 
-                    try {
-                        // Prefer anchoring to the label if present, else to the group bbox
-                        const label = (Util.eventLabel ? (Util.eventLabel(evData) || 'Event') : (evData.display_label || evData.label || 'Event'));
-                        const labelNode = d3.select(this).select("text.event-label").node();
-                        const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
-                        InfoBox.show(evData, box);
-                    } catch (_) {
-                        // Fallback: place near screen center if bbox fails
-                        const fake = {
-                            left: window.innerWidth / 2 - 40,
-                            top: window.innerHeight / 2 - 20,
-                            right: window.innerWidth / 2 + 40,
-                            bottom: window.innerHeight / 2 + 20
-                        };
-                        InfoBox.show(evData, fake);
-                    }
-                });
+            //         try {
+            //             // Prefer anchoring to the label if present, else to the group bbox
+            //             const label = (Util.eventLabel ? (Util.eventLabel(evData) || 'Event') : (evData.display_label || evData.label || 'Event'));
+            //             const labelNode = d3.select(this).select("text.event-label").node();
+            //             const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
+            //             InfoBox.show(evData, box);
+            //         } catch (_) {
+            //             // Fallback: place near screen center if bbox fails
+            //             const fake = {
+            //                 left: window.innerWidth / 2 - 40,
+            //                 top: window.innerHeight / 2 - 20,
+            //                 right: window.innerWidth / 2 + 40,
+            //                 bottom: window.innerHeight / 2 + 20
+            //             };
+            //             InfoBox.show(evData, fake);
+            //         }
+            //     });
         });
 
         // v40.3: change active only on click (single source of truth = state.activeTheme)
@@ -657,6 +665,20 @@ let __firstRenderFired = false;
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
             markPrefocusClass();
+            // after: markPrefocusClass();
+            if (window.PrefocusInfo && state.__prefocusKey) {
+                window.PrefocusInfo.onPrefocus(state.__prefocusKey, () => {
+                    // etsi prefocus-label ja palauta sen bbox + data
+                    const sel = d3.selectAll("g.e")
+                        .filter(d => (d && (d.label + d.time_years) === state.__prefocusKey))
+                        .select("text.event-label");
+                    const node = sel.node();
+                    if (!node) return null;
+                    return { box: node.getBoundingClientRect(), data: sel.datum() };
+                });
+            } else if (window.PrefocusInfo) {
+                window.PrefocusInfo.onPrefocus(null);
+            }
 
             setZOrder();
         } finally {
@@ -726,13 +748,12 @@ let __firstRenderFired = false;
         layout();
         layoutCenterOverlay();   // v42: place hairline + label
 
-        // v33: info-paneelin toggle (tukee sekä #info-box että #help)
+        // Info-box toggle: skip internal handler if external controller (index.html) present
         const infoToggle = document.getElementById('info-toggle') || document.getElementById('helpBtn');
         const infoBox = document.getElementById('info-box') || document.getElementById('help');
-        if (infoToggle && infoBox) {
+        if (!DISABLE_INTERNAL_INFO_TOGGLE && infoToggle && infoBox) {
             infoToggle.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // tue sekä [hidden] että display:none
                 if ('hidden' in infoBox) infoBox.hidden = !infoBox.hidden;
                 if (infoBox.style) infoBox.style.display = (infoBox.style.display === 'block' ? 'none' : 'block');
             }, { passive: true });
