@@ -3,7 +3,7 @@
 
 <head>
     <!--
-    Timeline v47.2 — file structure (short version)
+    Timeline v47.5 — file structure (short version)
     =============================================
     - index.html        : HTML layout, styles, minimal glue.
     - style.css         : Styles (cards, InfoBox, editor panel).
@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v47.4   </title>
+        <title>History Timeline v47.5   </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,11 +32,11 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v47.4</span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47.5</span>
     </h1>
 
     <div id="info-toggle">?</div>
-<div id="info-box" style="display:none;">
+    <div id="info-box" style="display:none; position:fixed; z-index:2600;">
     <div id="help-message">
         <p><em>Experimental visualization</em> of history across an immense time span.</p>
         <p>A vertical, <em>zoomable logarithmic timeline</em> of key events from the Big Bang to the present
@@ -364,6 +364,7 @@
                         const horizDominates = (Math.abs(dxTot) > Math.abs(dyTot) * DOM_RATIO);
                         mode = (horizDominates && startInCenter) ? 'zoom' : 'pan';
                         setGestureActive(true);
+                        window.__HAS_INTERACTED__ = true; // v47.5: first real gesture → allow prefocus later
                     }
 
                     // --- zoom mode ---
@@ -1051,41 +1052,58 @@
 </script>
 
 <script>
-    /* Info toggle — disable PrefocusInfo while help panel is open (v47.6) */
+    /* Info toggle — close with Esc or any outside interaction (v47.7) */
     (function () {
         const btn = document.getElementById("info-toggle");
         const panel = document.getElementById("info-box");
         let helpActive = false;
 
+        function setHelp(on) {
+            const next = !!on;
+            helpActive = next;
+            panel.style.display = next ? "block" : "none";
+            btn.classList.toggle("active", next);
+
+            // While help is open, disable prefocus; on close, require fresh motion
+            if (window.PrefocusInfo) {
+                PrefocusInfo.setDisabled(next);
+                PrefocusInfo.disarm();
+            }
+            if (window.InfoBox && InfoBox.hide) InfoBox.hide();
+        }
+
+        // Toggle by button
         btn.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
-
-            helpActive = !helpActive;
-            panel.style.display = helpActive ? "block" : "none";
-
-            // Close any open event info and fully disarm prefocus
-            if (window.PrefocusInfo) {
-                PrefocusInfo.setDisabled(helpActive);  // while help is open, prefocus is disabled
-                PrefocusInfo.disarm();                 // require fresh viewport motion later
-            }
-            if (window.InfoBox && InfoBox.hide) InfoBox.hide();
-
-            btn.classList.toggle("active", helpActive);
+            setHelp(!helpActive);
         });
 
-        // Defensive: if a render happens while help is open, keep InfoBox hidden
+        // Do NOT close when interacting inside the panel
+        panel.addEventListener("click", (e) => e.stopPropagation(), { capture: true });
+        panel.addEventListener("pointerdown", (e) => e.stopPropagation(), { capture: true });
+
+        // Close on ESC from anywhere
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && helpActive) setHelp(false);
+        });
+
+        // Close on ANY interaction outside the help panel (including SVG/timeline)
+        // Use pointerdown in capture phase so it wins over other handlers.
+        document.addEventListener("pointerdown", (ev) => {
+            if (!helpActive) return;
+
+            const t = ev.target;
+            // clicks on the toggle button or inside the panel should not close
+            if (t === btn || panel.contains(t)) return;
+
+            setHelp(false);
+        }, { capture: true, passive: true });
+
+        // Close on any timeline render (zoom/pan triggers a render)
         document.addEventListener("timeline:render", () => {
-            if (helpActive && window.InfoBox) InfoBox.hide();
+            if (helpActive) setHelp(false);
         });
-
-        // Global UI disarm:
-        // Any click OUTSIDE the SVG timeline disarms prefocus (so buttons/controls won't trigger popups).
-        document.addEventListener("click", (ev) => {
-            const svg = document.getElementById("timeline");
-            if (!svg || svg.contains(ev.target)) return; // clicks inside svg are okay
-            if (window.PrefocusInfo) PrefocusInfo.disarm();
-        }, true);
     })();
 </script>
 

@@ -532,14 +532,19 @@ text.event-label {
     background: #333;
     border-color: #777;
 }
-/* --- v46.4: inline event editor --- */
+/* --- v47.4: inline event editor --- */
 #event-editor {
-    position: relative;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: #1b1b1b;
     border-top: 1px solid #444;
     padding: 12px;
     font: 400 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     color: #eee;
+    z-index: 2800;
+    /* above event-info (2200) and help (2600) */
 }
 
 #event-editor[hidden] {
@@ -606,6 +611,10 @@ text.event-label {
     grid-column: span 1;
 }
 
+body.editor-open #event-info {
+    pointer-events: none;
+}
+
 /* Long fields spanning both columns */
 #edit-desc,
 #edit-link-url {
@@ -626,7 +635,7 @@ text.event-label {
         top: calc(env(safe-area-inset-top) + var(--header-h));
         bottom: 0;
 
-        z-index: 1800;
+        z-index: 2800;
         /* under #info-toggle (2000) and #event-info (2200) */
         margin: 0;
         width: 100vw;

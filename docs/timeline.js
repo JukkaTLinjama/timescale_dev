@@ -4,6 +4,9 @@
 
 // Safe debug logger (no-op unless ?debug=1 used)
 const DBG = !!window.__DBG__;
+window.__HELP_MODE__ = !!window.__HELP_MODE__;
+window.__HAS_INTERACTED__ = !!window.__HAS_INTERACTED__;
+
 const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
 // --- Runtime helpers ---
 // NOTE v45.5: Util.safe and Util.timed are already defined in index_.html.
@@ -316,6 +319,18 @@ let __firstRenderFired = false;
     }
 
     function computePrefocusData() {
+        // v47.5: gate prefocus – show only after first real interaction, and never in help mode
+        if (!window.__HAS_INTERACTED__) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+        if (window.__HELP_MODE__) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+
         if (!state.events || !state.events.length || !state.y) {
             state.__prefocusKey = null;
             state.__prefocusY = null;
@@ -665,19 +680,34 @@ let __firstRenderFired = false;
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
             markPrefocusClass();
-            // after: markPrefocusClass();
-            if (window.PrefocusInfo && state.__prefocusKey) {
-                window.PrefocusInfo.onPrefocus(state.__prefocusKey, () => {
-                    // etsi prefocus-label ja palauta sen bbox + data
-                    const sel = d3.selectAll("g.e")
-                        .filter(d => (d && (d.label + d.time_years) === state.__prefocusKey))
-                        .select("text.event-label");
-                    const node = sel.node();
-                    if (!node) return null;
-                    return { box: node.getBoundingClientRect(), data: sel.datum() };
-                });
-            } else if (window.PrefocusInfo) {
-                window.PrefocusInfo.onPrefocus(null);
+                    /* PrefocusInfo: request popup only after we know the current prefocus target.
+            - key: a stable identifier for the focused event (matches how you build the prefocus key)
+            - resolver(): computes the event label's bounding box and returns { box, data } for positioning
+            */
+            if (window.PrefocusInfo && typeof PrefocusInfo.onPrefocus === 'function') {
+                const key = state && state.__prefocusKey ? state.__prefocusKey : null;
+
+                const resolver = () => {
+                    if (!key) return null;
+
+                    // Match the same key logic used to build __prefocusKey
+                    const groupSel = d3.selectAll("g.e")
+                        .filter(d => (d && (d.label + d.time_years) === key));
+
+                    const groupNode = groupSel.node();
+                    if (!groupNode) return null;
+
+                    // Prefer the label text node for a tighter anchor; fallback to the group bbox
+                    const labelNode = d3.select(groupNode).select("text.event-label").node();
+                    const targetNode = labelNode || groupNode;
+
+                    const box = targetNode.getBoundingClientRect();
+                    const data = groupSel.datum();
+
+                    return (box && data) ? { box, data } : null;
+                };
+
+                PrefocusInfo.onPrefocus(key, resolver);
             }
 
             setZOrder();
@@ -695,6 +725,8 @@ let __firstRenderFired = false;
         .extent([[0, 0], [state.width, state.height]])  // viewport anchor
 
         .on("zoom", (event) => {
+            window.__HAS_INTERACTED__ = true; // v47.5: any zoom/pan unlocks prefocus
+
             // 1) rescale Y (no domain clamp)
             const t = event.transform;
             state.y = t.rescaleY(state.yBase);
@@ -724,10 +756,10 @@ let __firstRenderFired = false;
             }
 
             // 3) redraw
-            onViewportMotion(); // close info when user zooms
             // EN: brighten axis only on real user input, not on programmatic zooms
             if (event && event.sourceEvent) bumpAxisVisibility();
             updateZoomIndicator(t);
+            onViewportMotion();
             applyZoom();
         })
 
@@ -751,19 +783,6 @@ let __firstRenderFired = false;
         // Info-box toggle: skip internal handler if external controller (index.html) present
         const infoToggle = document.getElementById('info-toggle') || document.getElementById('helpBtn');
         const infoBox = document.getElementById('info-box') || document.getElementById('help');
-        if (!DISABLE_INTERNAL_INFO_TOGGLE && infoToggle && infoBox) {
-            infoToggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if ('hidden' in infoBox) infoBox.hidden = !infoBox.hidden;
-                if (infoBox.style) infoBox.style.display = (infoBox.style.display === 'block' ? 'none' : 'block');
-            }, { passive: true });
-
-            document.addEventListener('click', () => {
-                if ('hidden' in infoBox) infoBox.hidden = true;
-                if (infoBox.style) infoBox.style.display = 'none';
-            });
-            infoBox.addEventListener('click', (e) => e.stopPropagation());
-        }
 
         // zoom extents
         svg.call(zoomBehavior);

@@ -87,6 +87,7 @@
     function openEditor(ev) {
       editor.hidden = false;
         window.__editorOpen = true;
+        document.body.classList.add('editor-open');
       f.title.value = ev?.display_label ?? ev?.label ?? '';
       f.year.value = Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? '');
       f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
@@ -132,7 +133,12 @@
       editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-      function closeEditor() { editor.hidden = true; window.__editorOpen = false; }
+      function closeEditor() {
+          editor.hidden = true;
+          window.__editorOpen = false;
+          document.body.classList.remove('editor-open');
+      }
+
         if (closeBtn) closeBtn.addEventListener('click', closeEditor);
       // EN: Close the inline editor with Escape, if the panel is visible.
       document.addEventListener('keydown', (e) => {
@@ -200,12 +206,13 @@
                   return b;
               };
 
-              // --- Save draft → visible in Preview theme ---
+              // --- Save draft → UPSERT to Preview (update existing by source, or create once) ---
               wrap.appendChild(mk('Save draft', 'Save/update a visible draft in the “preview” theme', () => {
-                  if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
-                      alert('Preview save not available (EditorPreviewOps missing).');
+                  if (!window.EditorPreviewOps || typeof EditorPreviewOps.upsertFromEventId !== 'function') {
+                      alert('Preview save not available (EditorPreviewOps.upsertFromEventId missing).');
                       return;
                   }
+
                   // Base ID: prefer focus/selection; fallback to sourceId or explicit prompt.
                   let baseId = (function () {
                       try { if (window.TimelineState?.focus?.id) return TimelineState.focus.id; } catch { }
@@ -216,27 +223,29 @@
                   if (!baseId) return;
 
                   const form = getData();
+
+                  // Build overrides; we compute time_years from year/date inside upsert
                   const overrides = {
                       label: form.label,
                       display_label: form.display_label,
                       comments: form.comments,
-                      year: form.year,
-                      date: form.date,
+                      year: form.year,       // may be undefined; upsert will interpret
+                      date: form.date,       // may be '', same
                       link: form.link,
                       source: form.source,
                       tags: form.tags,
-                      edited_by: form.edited_by,
-                      edited_at: form.edited_at,
                       created_by: form.created_by,
                       created_at: form.created_at,
+                      edited_by: form.edited_by,
+                      updated_at: new Date().toISOString(), // v47.5: canonical update timestamp
                       theme: 'preview'
                   };
-                  const dup = EditorPreviewOps.duplicateFromEventId(baseId, overrides);
-                  if (dup) {
-                      // remember last created preview id for Delete
-                      editor.dataset.lastDupId = dup.id;
+
+                  const res = EditorPreviewOps.upsertFromEventId(baseId, overrides);
+                  if (res && res.ok && res.draft) {
+                      editor.dataset.lastDupId = res.draft.id; // remember for Delete
                       window.rerenderTimeline?.();
-                      showToast(`Draft saved: ${dup.label}`);
+                      showToast(res.created ? `Draft created: ${res.draft.label}` : `Draft updated: ${res.draft.label}`);
                   } else {
                       alert('Preview save failed. See console for details.');
                   }
@@ -778,11 +787,138 @@
 })();
 
 
-
-
-
-
 // --- B )  InfoBox popup ----------------------------------------------------------
+/* --- EditorPreviewOps.upsertFromEventId --------------------------------------
+   Upsert a preview draft for given base event id:
+   - If a draft already exists for previewSource.id === base.id → update it in place
+   - Otherwise create one (equivalent to a single duplicate) and bind it to this base
+   Always re-derive time_years from overrides (year/date) if provided.
+-------------------------------------------------------------------------------*/
+(function () {
+    function _now() { return new Date(); }
+    function _presentYear() { return _now().getFullYear(); }
+
+    function _deriveTimeYears(overrides, base, existingDraft) {
+        // Priority: explicit time_years > year > date > existing > base inference
+        if (typeof overrides.time_years === 'number') return overrides.time_years;
+
+        if (typeof overrides.year === 'number' && Number.isFinite(overrides.year)) {
+            return Math.max(0, _presentYear() - overrides.year);
+        }
+        if (overrides.date) {
+            const d = (overrides.date instanceof Date) ? overrides.date : new Date(overrides.date);
+            if (!isNaN(d)) {
+                const DAY_MS = 86400000, YEAR_DAYS = 365.2425;
+                return Math.max(0, ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS);
+            }
+        }
+        if (existingDraft && typeof existingDraft.time_years === 'number') return existingDraft.time_years;
+        if (base) {
+            if (typeof base.time_years === 'number') return base.time_years;
+            if (typeof base.year === 'number') return Math.max(0, _presentYear() - base.year);
+            if (base.date) {
+                const d = (base.date instanceof Date) ? base.date : new Date(base.date);
+                if (!isNaN(d)) {
+                    const DAY_MS = 86400000, YEAR_DAYS = 365.2425;
+                    return Math.max(0, ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS);
+                }
+            }
+        }
+        return 0; // near "now"
+    }
+
+    function _formatPreviewLabel(origTheme, coreLabel) {
+        const baseLabel = (coreLabel && String(coreLabel).trim()) || 'Untitled';
+        return (window.DraftUI && DraftUI.formatDraftLabel)
+            ? DraftUI.formatDraftLabel(origTheme, baseLabel)
+            : `draft: ${origTheme || 'unknown'} - ${baseLabel}`;
+    }
+
+    function upsertFromEventId(eventId, overrides = {}) {
+        if (!eventId) { console.warn('[Upsert] Missing eventId'); return null; }
+        if (!window.PreviewData || typeof PreviewData.get !== 'function' || typeof PreviewData.set !== 'function') {
+            console.warn('[Upsert] PreviewData not available.'); return null;
+        }
+
+        const pack = (window.TS_DATA && Array.isArray(TS_DATA.events)) ? TS_DATA : null;
+        const base = pack ? TS_DATA.events.find(e => e && e.id === eventId) : null;
+        if (!base) { console.warn('[Upsert] Base event not found:', eventId); return null; }
+
+        const list = PreviewData.get() || [];
+        const existing = list.find(e => e && e.previewSource && e.previewSource.id === base.id);
+
+        const origTheme = base.theme || (existing ? existing.previewOriginalTheme : null) || null;
+
+        // Compute label core (strip old "draft: <theme> - " if present)
+        const coreLabel = (function () {
+            if (overrides.label != null && overrides.label !== '') return String(overrides.label);
+            const prev = existing ? existing.label : (base.label || '');
+            if (window.DraftUI && DraftUI.stripDraftLabel) return DraftUI.stripDraftLabel(prev);
+            return String(prev || '').replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+        })();
+
+        const time_years = _deriveTimeYears(overrides, base, existing);
+
+        if (existing) {
+            // Update in place (same id)
+            existing.label = _formatPreviewLabel(origTheme, coreLabel);
+            existing.comments = (overrides.comments != null) ? overrides.comments : (existing.comments ?? base.comments ?? '');
+            existing.time_years = time_years;
+            existing.link = (overrides.link != null) ? overrides.link : (existing.link ?? base.link ?? undefined);
+            existing.source = (overrides.source != null) ? overrides.source : (existing.source ?? base.source ?? '');
+            existing.tags = (Array.isArray(overrides.tags)) ? overrides.tags : (existing.tags ?? base.tags ?? []);
+            existing.updated_at = overrides.updated_at || new Date().toISOString();
+            existing.edited_by = (overrides.edited_by != null) ? overrides.edited_by : (existing.edited_by ?? undefined);
+            existing.display = (overrides.display != null) ? overrides.display : (existing.display ?? base.display ?? undefined);
+            existing.i18n = (overrides.i18n != null) ? overrides.i18n : (existing.i18n ?? base.i18n ?? undefined);
+
+            PreviewData.set(list);
+            return { ok: true, created: false, draft: existing };
+        }
+
+        // No draft yet → create a single preview draft (like duplicate(1)), bind to this base
+        // Build a unique id baseId(1)/…; reuse logic from duplicate path
+        const baseId = String(base.id || 'orig');
+        const rx = new RegExp('^' + baseId.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\((\\d+)\\)$');
+        let maxN = 0;
+        list.forEach(e => {
+            const m = e && typeof e.id === 'string' ? e.id.match(rx) : null;
+            if (m) { const n = +m[1]; if (Number.isFinite(n) && n > maxN) maxN = n; }
+        });
+        const idTaken = id => list.some(e => e && e.id === id);
+        let newId = `${baseId}(${Math.max(1, maxN + 1)})`;
+        let guard = 0;
+        while (idTaken(newId) && guard++ < 50) {
+            maxN += 1;
+            newId = `${baseId}(${maxN})`;
+        }
+
+        const previewLabel = _formatPreviewLabel(origTheme, coreLabel);
+        const draft = {
+            id: newId,
+            theme: 'preview',
+            label: previewLabel,
+            comments: overrides.comments ?? (base.comments || ''),
+            time_years,
+            previewSource: { id: base.id, theme: origTheme },
+            previewOriginalTheme: origTheme,
+            created_by: overrides.created_by || undefined,
+            created_at: overrides.created_at || undefined,
+            updated_at: overrides.updated_at || new Date().toISOString(),
+            edited_by: overrides.edited_by || undefined,
+            display: overrides.display ?? base.display ?? undefined,
+            i18n: overrides.i18n ?? base.i18n ?? undefined
+        };
+
+        list.push(draft);
+        PreviewData.set(list);
+        return { ok: true, created: true, draft };
+    }
+
+    window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
+        upsertFromEventId
+    });
+})();
 
 (function () {
   // =================
@@ -881,6 +1017,15 @@
   // =================
   // EN: Small, skippable intro that highlights a nearby theme and demonstrates
   //     zoom/pan. Skipped with ?demo=0. Emits 'timeline:intro-done'.
+    // v47.6: ensure we schedule intro only once, even if multiple triggers fire
+    if (window.__introScheduled == null) window.__introScheduled = false;
+
+    function scheduleIntroOnce(delayMs) {
+        if (window.__introCompleted) return;   // already finished
+        if (window.__introScheduled) return;   // already scheduled
+        window.__introScheduled = true;
+        setTimeout(runStartup, Math.max(0, delayMs | 0));
+    }
 
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   function ensureTouchCursor() {
@@ -922,9 +1067,10 @@
   }
   function hideTouchCursor(el) { if (!el) return; el.style.opacity = '0'; setTimeout(() => { el.parentNode && el.parentNode.removeChild(el); }, 280); }
 
-  async function runStartup() {
-    const api = window.TimelineAPI; if (!api) return;
-    let cursor = ensureTouchCursor();
+    async function runStartup() {
+        window.__introScheduled = true; // ensure single run even if manually re-called
+        const api = window.TimelineAPI; if (!api) return;
+        let cursor = ensureTouchCursor(); // must exist before first moveTouchCursor()
 
     const svg = document.getElementById('timeline');
     const titles = svg?.querySelectorAll('text.card-title') || [];
@@ -946,7 +1092,8 @@
     const r = cont.getBoundingClientRect();
     const start = { x: Math.round(r.left + r.width * 0.5), y: target.y };
     tapRipple(start.x, start.y); await sleep(260);
-    cursor = ensureTouchCursor(); moveTouchCursorInstant(cursor, start.x, start.y, true); await sleep(180);
+    cursor = ensureTouchCursor(); 
+    moveTouchCursorInstant(cursor, start.x, start.y, true); await sleep(180);
 
     const dx = 120;
     api.animScaleBy(1.5, start.x, start.y, 700); moveTouchCursor(cursor, start.x - dx, start.y, true); await sleep(740);
@@ -962,26 +1109,27 @@
     document.dispatchEvent(new CustomEvent('timeline:intro-done'));
   }
 
-  document.addEventListener('timeline:first-render', () => {
-    const url = new URL(location.href);
-    const demoParam = url.searchParams.get('demo');
-    const force = demoParam !== '0';
-    if (!force) {
-      console.log('[startup] skipped by ?demo=0');
-      window.__introCompleted = true;
-      document.dispatchEvent(new CustomEvent('timeline:intro-done'));
-      return;
-    }
-    console.log('[startup] running intro');
-    setTimeout(runStartup, 380);
-  });
+    document.addEventListener('timeline:first-render', () => {
+        const url = new URL(location.href);
+        const demoParam = url.searchParams.get('demo');
+        const force = demoParam !== '0';
+        if (!force) {
+            console.log('[startup] skipped by ?demo=0');
+            window.__introCompleted = true;
+            document.dispatchEvent(new CustomEvent('timeline:intro-done'));
+            return;
+        }
+        console.log('[startup] schedule (first-render)');
+        scheduleIntroOnce(380);
+    });
+
     // Fallback #1: if first-render never arrives, start on the first generic render.
     document.addEventListener('timeline:render', () => {
         if (window.__introCompleted) return;
         const url = new URL(location.href);
         if (url.searchParams.get('demo') === '0') return; // respect opt-out
-        console.log('[startup] fallback via timeline:render');
-        setTimeout(runStartup, 180);
+        console.log('[startup] schedule (fallback: timeline:render)');
+        scheduleIntroOnce(180);
     }, { once: true });
 
     // Fallback #2: time-based guard in case no custom events are fired at all.
@@ -990,8 +1138,8 @@
         const url = new URL(location.href);
         if (url.searchParams.get('demo') === '0') return;
         if (window.TimelineAPI) {
-            console.log('[startup] fallback via timeout');
-            runStartup();
+            console.log('[startup] schedule (fallback: timeout)');
+            scheduleIntroOnce(0);
         }
     }, 2000);
 
