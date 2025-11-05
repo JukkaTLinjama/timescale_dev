@@ -1,4 +1,4 @@
-// timeline.js — v46 stable (2025-10-30)
+// timeline.js — v47.6 stable (2025-11)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -6,6 +6,9 @@
 const DBG = !!window.__DBG__;
 window.__HELP_MODE__ = !!window.__HELP_MODE__;
 window.__HAS_INTERACTED__ = !!window.__HAS_INTERACTED__;
+// v47.5: motion timestamp + last delivered prefocus key
+if (typeof window.__LAST_MOTION_TS__ !== 'number') window.__LAST_MOTION_TS__ = 0;
+if (typeof window.__LAST_PREFOCUS_KEY__ === 'undefined') window.__LAST_PREFOCUS_KEY__ = null;
 
 const log = (...args) => { if (DBG) console.log("[timeline]", ...args); };
 // --- Runtime helpers ---
@@ -203,6 +206,7 @@ let __firstRenderFired = false;
         selection.call(zoomBehavior.scaleBy, factor, [x, y]);
     }
     function onViewportMotion() {
+        window.__LAST_MOTION_TS__ = Date.now();
         // Close any visible InfoBox immediately on motion
         if (window.InfoBox && InfoBox.hide) InfoBox.hide();
 
@@ -319,19 +323,7 @@ let __firstRenderFired = false;
     }
 
     function computePrefocusData() {
-        // v47.5: gate prefocus – show only after first real interaction, and never in help mode
-        if (!window.__HAS_INTERACTED__) {
-            state.__prefocusKey = null;
-            state.__prefocusY = null;
-            return;
-        }
-        if (window.__HELP_MODE__) {
-            state.__prefocusKey = null;
-            state.__prefocusY = null;
-            return;
-        }
-
-        if (!state.events || !state.events.length || !state.y) {
+        if (!state.y) {
             state.__prefocusKey = null;
             state.__prefocusY = null;
             return;
@@ -339,10 +331,48 @@ let __firstRenderFired = false;
 
         const cy = getFocusAnchorY();
 
-        // 1) Find the event whose Y position is closest to the screen center
+        // --- v47.6: prefocus candidates = base events + preview + present (when available)
+        let candidates = Array.isArray(state.events) ? state.events.slice() : [];
+
+        // Merge preview drafts only if the preview card is actually visible
+        try {
+            if (window.PreviewData && typeof PreviewData.get === 'function') {
+                // detect if Preview card is hidden by the editor controls
+                const hiddenPreview = document.querySelector('g.card[data-hidden-by-controls="1"]');
+                if (!hiddenPreview) {
+                    const drafts = PreviewData.get() || [];
+                    if (Array.isArray(drafts) && drafts.length) {
+                        candidates = candidates.concat(drafts);
+                    }
+                }
+            }
+        } catch (_) { }
+
+        // Merge present anchors if a provider exists
+        try {
+            // Accept any global that returns an array of {time_years, ...}
+            const presentList =
+                (window.PresentData && typeof PresentData.get === 'function' && PresentData.get()) ||
+                (window.PresentOps && typeof PresentOps.list === 'function' && PresentOps.list()) ||
+                null;
+            if (Array.isArray(presentList) && presentList.length) {
+                candidates = candidates.concat(presentList);
+            }
+        } catch (_) { }
+
+        // Keep only items that can be placed on the Y scale
+        candidates = candidates.filter(e => typeof e?.time_years === 'number' && isFinite(e.time_years));
+
+        if (!candidates.length) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+
+        // 1) Find the event whose Y is closest to the focus anchor
         let best = null;
         let bestDist = Infinity;
-        for (const e of state.events) {
+        for (const e of candidates) {
             const yy = state._yMap ? state._yMap.get(e) : state.y(e.time_years);
             const d = Math.abs(yy - cy);
             if (d < bestDist) {
@@ -357,22 +387,50 @@ let __firstRenderFired = false;
             return;
         }
 
-        // 2) Apply distance threshold + hysteresis
-        const R = (cfg.prefocus && +cfg.prefocus.radiusPx) || 36;
-        const H = (cfg.prefocus && +cfg.prefocus.hysteresisPx) || 0;
+        // 2) Use same radius/threshold logic as before
+        const prevKey = state.__prefocusKey;
+        // Build a more stable key:
+        // - For 'present' theme, ignore tiny time drift: strip trailing " (…ago)" and avoid time_years.
+        //   → key changes at most once per wall-clock second.
+        // - For others, keep the old behavior (label + time_years).
+        let candKey;
+        const baseLabel = (best.label || best.display_label || '').toString();
+        if (best.theme === 'present') {
+            // remove " (…ago)" if present → keeps "HH:MM:SS" stable during that second
+            const stable = baseLabel.replace(/\s*\(.*\)\s*$/, '');
+            candKey = `present@${stable}`;
+        } else {
+            candKey = baseLabel + best.time_years;
+        }
+        const viewH = innerHeight();
+        const R = Math.max(14, Math.min(48, viewH * 0.06));
+        const H = 10; // hysteresis
 
-        const prevKey = state.__prefocusKey || null;
-        const candKey = best.label + best.time_years;
+        let allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
+        // Sticky tolerance: if previous prefocus Y exists and the new best Y is very close,
+        // allow a wider window (prevents 1 s present updates from kicking us out).
+        {
+            const prevY = state.__prefocusY;
+            if (prevY != null) {
+                const bestY = state.y(best.time_years);
+                // base radius R already accounts for screen height; add a sticky margin
+                const STICKY = Math.max(12, Math.min(36, innerHeight() * 0.03));
+                if (Math.abs(bestY - prevY) <= STICKY) {
+                    // treat as if same target → give hysteresis headroom
+                    // (do not force key equality; we only widen acceptance)
+                    // NOTE: allowed is a const in original; re-declare as let above if needed
+                    // In this file allowed was 'const' — switch it to 'let' one line above:
+                    //   let allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
+                    allowed = Math.max(allowed, R + H);
+                }
+            }
+        }
 
-        // If we are already focused on the same event, allow slightly larger distance
-        const allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
-
-        // 3) Only keep prefocus if event is within allowed distance
+        // 3) Only keep prefocus if within allowed distance
         if (bestDist <= allowed) {
             state.__prefocusKey = candKey;
             state.__prefocusY = state.y(best.time_years);
         } else {
-            // No nearby event → no prefocus at all
             state.__prefocusKey = null;
             state.__prefocusY = null;
         }
@@ -389,7 +447,14 @@ let __firstRenderFired = false;
 
         // Mark both the event group and its label
         d3.selectAll("g.e")
-            .filter(d => (d && (d.label + d.time_years) === key))
+            .filter(d => {
+                if (!d) return false;
+                if (d.theme === 'present') {
+                    const stable = (d.label || '').replace(/\s*\(.*\)\s*$/, '');
+                    return key === `present@${stable}`;
+                }
+                return key === (d.label + d.time_years);
+            })
             .each(function () {
                 d3.select(this).classed("is-prefocus", true);
                 d3.select(this).select("text.event-label").classed("prefocus", true);
@@ -595,30 +660,77 @@ let __firstRenderFired = false;
                     .text(Util.eventTitleShort(e));
             });
 
-            // v42.3 (click-only): open info when clicking an event group or its label
-            // evSel.merge(evEnt)
-            //     .on('click', function (d3evt, evData) {
-            //         // Prevent card activation handlers and background close from firing
-            //         d3evt.preventDefault();
-            //         d3evt.stopPropagation();
+            // v47.7: open InfoBox by double-click OR long-press on an event (label or its group)
+            (function attachOpenHandlers() {
+                const PRESS_MS = 500;   // long-press threshold (ms)
+                const MOVE_TOL = 8;     // px, cancel long-press if pointer moves too much
 
-            //         try {
-            //             // Prefer anchoring to the label if present, else to the group bbox
-            //             const label = (Util.eventLabel ? (Util.eventLabel(evData) || 'Event') : (evData.display_label || evData.label || 'Event'));
-            //             const labelNode = d3.select(this).select("text.event-label").node();
-            //             const box = (labelNode && labelNode.getBoundingClientRect()) || this.getBoundingClientRect();
-            //             InfoBox.show(evData, box);
-            //         } catch (_) {
-            //             // Fallback: place near screen center if bbox fails
-            //             const fake = {
-            //                 left: window.innerWidth / 2 - 40,
-            //                 top: window.innerHeight / 2 - 20,
-            //                 right: window.innerWidth / 2 + 40,
-            //                 bottom: window.innerHeight / 2 + 20
-            //             };
-            //             InfoBox.show(evData, fake);
-            //         }
-            //     });
+                evSel.merge(evEnt)
+                    // 1) Double-click to open InfoBox
+                    .on('dblclick', function (d3evt, evData) {
+                        try {
+                            d3evt.preventDefault();
+                            d3evt.stopPropagation();
+
+                            // Prefer anchoring to the label; fallback to group bbox
+                            const labelNode = d3.select(this).select("text.event-label").node();
+                            const targetNode = labelNode || this;
+                            const box = targetNode.getBoundingClientRect();
+
+                            if (window.InfoBox && typeof InfoBox.show === "function" && box) {
+                                InfoBox.show(evData, box);
+                            }
+                        } catch (_) { }
+                    })
+                    // 2) Long-press (pointerdown & hold) to open InfoBox
+                    .on('pointerdown', function (d3evt, evData) {
+                        try {
+                            // Don’t steal stylus/secondary buttons; only primary pointer
+                            if (d3evt.button != null && d3evt.button !== 0) return;
+
+                            const target = this;
+                            const startX = d3evt.clientX, startY = d3evt.clientY;
+                            let moved = false, timer = null;
+
+                            const clearAll = () => {
+                                if (timer) { clearTimeout(timer); timer = null; }
+                                target.removeEventListener('pointermove', onMove, { passive: true });
+                                target.removeEventListener('pointerup', onUp, { passive: true });
+                                target.removeEventListener('pointercancel', onUp, { passive: true });
+                                target.removeEventListener('pointerleave', onUp, { passive: true });
+                            };
+
+                            const onMove = (e) => {
+                                if (moved) return;
+                                const dx = (e.clientX - startX);
+                                const dy = (e.clientY - startY);
+                                if (Math.hypot(dx, dy) > MOVE_TOL) moved = true;
+                            };
+
+                            const onUp = () => { clearAll(); };
+
+                            target.addEventListener('pointermove', onMove, { passive: true });
+                            target.addEventListener('pointerup', onUp, { passive: true });
+                            target.addEventListener('pointercancel', onUp, { passive: true });
+                            target.addEventListener('pointerleave', onUp, { passive: true });
+
+                            timer = setTimeout(() => {
+                                if (moved) { clearAll(); return; }
+                                try {
+                                    const labelNode = d3.select(target).select("text.event-label").node();
+                                    const anchor = labelNode || target;
+                                    const box = anchor.getBoundingClientRect();
+                                    if (window.InfoBox && typeof InfoBox.show === "function" && box) {
+                                        InfoBox.show(evData, box);
+                                    }
+                                } finally {
+                                    clearAll();
+                                }
+                            }, PRESS_MS);
+                        } catch (_) { }
+                    });
+            })();
+
         });
 
         // v40.3: change active only on click (single source of truth = state.activeTheme)
@@ -684,30 +796,49 @@ let __firstRenderFired = false;
             - key: a stable identifier for the focused event (matches how you build the prefocus key)
             - resolver(): computes the event label's bounding box and returns { box, data } for positioning
             */
+            /* PrefocusInfo: only notify on key change or shortly after real motion.
+                - Prevents present-loop re-firing the same popup every second on mobile.
+            */
             if (window.PrefocusInfo && typeof PrefocusInfo.onPrefocus === 'function') {
-                const key = state && state.__prefocusKey ? state.__prefocusKey : null;
+                const key = (state && state.__prefocusKey) ? state.__prefocusKey : null;
 
-                const resolver = () => {
-                    if (!key) return null;
+                const unchanged = (key === window.__LAST_PREFOCUS_KEY__);
+                const freshMotion = (Date.now() - window.__LAST_MOTION_TS__) <= 750;
 
-                    // Match the same key logic used to build __prefocusKey
-                    const groupSel = d3.selectAll("g.e")
-                        .filter(d => (d && (d.label + d.time_years) === key));
+                if (!(unchanged && !freshMotion)) {
+                    const resolver = () => {
+                        if (!key) return null;
+                        const groupSel = d3.selectAll("g.e")
+                            .filter(d => {
+                                if (!d) return false;
+                                if (d.theme === 'present') {
+                                    const stable = (d.label || '').replace(/\s*\(.*\)\s*$/, '');
+                                    return key === `present@${stable}`;
+                                }
+                                return key === (d.label + d.time_years);
+                            });
 
-                    const groupNode = groupSel.node();
-                    if (!groupNode) return null;
+                        const groupNode = groupSel.node();
+                        if (!groupNode) return null;
+                        const labelNode = d3.select(groupNode).select("text.event-label").node();
+                        const targetNode = labelNode || groupNode;
+                        if (!targetNode) return null;
 
-                    // Prefer the label text node for a tighter anchor; fallback to the group bbox
-                    const labelNode = d3.select(groupNode).select("text.event-label").node();
-                    const targetNode = labelNode || groupNode;
+                        // --- new guard: ensure element is still in DOM and visible ---
+                        const box = targetNode.getBoundingClientRect?.();
+                        if (!box || !Number.isFinite(box.top) || box.height <= 0) return null;
 
-                    const box = targetNode.getBoundingClientRect();
-                    const data = groupSel.datum();
+                        const data = groupSel.datum?.();
+                        return (data) ? { box, data } : null;
+                    };
 
-                    return (box && data) ? { box, data } : null;
-                };
-
-                PrefocusInfo.onPrefocus(key, resolver);
+                    try {
+                        PrefocusInfo.onPrefocus(key, resolver);
+                        window.__LAST_PREFOCUS_KEY__ = key;
+                    } catch (err) {
+                        if (window.__DBG__) console.warn('[prefocus] skipped invalid resolver', err);
+                    }
+                }
             }
 
             setZOrder();

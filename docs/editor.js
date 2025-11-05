@@ -95,7 +95,7 @@
 
         // EN: Show source ID for clarity (read-only field in HTML).
         f.id.value = str(ev?.id ?? ev?._id ?? '');
-        f.id.dataset.sourceId = f.id.value;
+        f.id.dataset.sourceId = (ev?.previewSource?.id || f.id.value);
 
         // ---------- Theme badge in editor header: "draft: <theme>" for preview drafts ----------
         (function ensureThemeBadge() {
@@ -215,10 +215,21 @@
 
                   // Base ID: prefer focus/selection; fallback to sourceId or explicit prompt.
                   let baseId = (function () {
+                      const src = (f.id?.dataset?.sourceId || '').trim();
+                      if (src) return src;
                       try { if (window.TimelineState?.focus?.id) return TimelineState.focus.id; } catch { }
-                      const v = (f.id?.dataset?.sourceId || f.id?.value || '').trim();
+                      const v = (f.id?.value || '').trim();
                       return v || null;
                   })();
+
+                  // Normalize: if current id points to a preview draft, use its original source id instead
+                  try {
+                      const pack = (window.TS_DATA && Array.isArray(TS_DATA.events)) ? TS_DATA : null;
+                      const hit = pack ? TS_DATA.events.find(e => e && e.id === baseId) : null;
+                      const src = hit && hit.previewSource && hit.previewSource.id;
+                      if (src) baseId = src;
+                  } catch { }
+
                   if (!baseId) baseId = prompt('Enter the ID to use as a base for the Preview draft:');
                   if (!baseId) return;
 
@@ -835,6 +846,15 @@
     }
 
     function upsertFromEventId(eventId, overrides = {}) {
+        // Normalize: if eventId is a preview draft, switch to its previewSource.id
+        try {
+            const pack0 = (window.TS_DATA && Array.isArray(TS_DATA.events)) ? TS_DATA : null;
+            const hit0 = pack0 ? TS_DATA.events.find(e => e && e.id === eventId) : null;
+            if (hit0 && hit0.previewSource && hit0.previewSource.id) {
+                eventId = hit0.previewSource.id;
+            }
+        } catch { }
+
         if (!eventId) { console.warn('[Upsert] Missing eventId'); return null; }
         if (!window.PreviewData || typeof PreviewData.get !== 'function' || typeof PreviewData.set !== 'function') {
             console.warn('[Upsert] PreviewData not available.'); return null;
