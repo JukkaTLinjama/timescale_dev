@@ -1,4 +1,4 @@
-// timeline.js — v47.6 stable (2025-11)
+// timeline.js — v47.7 stable (2025-11)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -139,7 +139,7 @@ let __firstRenderFired = false;
     setZOrder();
 
     // v42: centerline + label (and a future-use invisible pad)
-    const centerZoomPad = svg.append("rect").attr("class", "centerZoomPad");
+    const centerZoomPad = svg.append("rect").attr("class", "centerZoomPad").style("pointer-events", "none");
     const centerZoomLine = svg.append("line").attr("class", "centerZoomLine");
     const centerZoomText = svg.append("text")
         .attr("class", "centerZoomLabel")
@@ -333,6 +333,9 @@ let __firstRenderFired = false;
 
         // --- v47.6: prefocus candidates = base events + preview + present (when available)
         let candidates = Array.isArray(state.events) ? state.events.slice() : [];
+        // v47.7: if preview card is hidden by editor controls, drop preview events from prefocus candidates
+        const __previewHidden = document.querySelector('g.card[data-hidden-by-controls="1"]');
+        if (__previewHidden) candidates = candidates.filter(e => e && e.theme !== 'preview');
 
         // Merge preview drafts only if the preview card is actually visible
         try {
@@ -660,74 +663,79 @@ let __firstRenderFired = false;
                     .text(Util.eventTitleShort(e));
             });
 
-            // v47.7: open InfoBox by double-click OR long-press on an event (label or its group)
+            // v47.7: mobile-friendly double-tap and long-press (pointer-based)
             (function attachOpenHandlers() {
-                const PRESS_MS = 500;   // long-press threshold (ms)
-                const MOVE_TOL = 8;     // px, cancel long-press if pointer moves too much
+                const TAP_MS = 450;     // double-tap max interval
+                const PRESS_MS = 500;   // long-press threshold
+                const MOVE_TOL = 10;    // px
+
+                let lastTapTime = 0;
+                let pressTimer = null;
+                let startX = 0, startY = 0;
+                let moved = false;
+
+                function openInfoFor(target, evData) {
+                    try {
+                        const labelNode = d3.select(target).select("text.event-label").node();
+                        const anchor = labelNode || target;
+                        const box = anchor && anchor.getBoundingClientRect && anchor.getBoundingClientRect();
+                        if (box && window.InfoBox && typeof InfoBox.show === "function") {
+                            InfoBox.show(evData, box);
+                        }
+                    } catch (_) { }
+                }
 
                 evSel.merge(evEnt)
-                    // 1) Double-click to open InfoBox
-                    .on('dblclick', function (d3evt, evData) {
-                        try {
+                    // help the browser: avoid double-tap zoom stealing the gesture
+                    .style("touch-action", "manipulation")
+                    .on("pointerdown", function (d3evt, evData) {
+                        // primary pointer only
+                        if (d3evt.button != null && d3evt.button !== 0) return;
+
+                        const now = performance.now();
+                        const isDoubleTap = (now - lastTapTime) <= TAP_MS;
+                        lastTapTime = now;
+
+                        startX = d3evt.clientX; startY = d3evt.clientY; moved = false;
+
+                        // long-press timer
+                        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                        pressTimer = setTimeout(() => {
+                            if (!moved) openInfoFor(this, evData);
+                            pressTimer = null;
+                        }, PRESS_MS);
+
+                        if (isDoubleTap) {
+                            // open immediately on double-tap
+                            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
                             d3evt.preventDefault();
                             d3evt.stopPropagation();
+                            openInfoFor(this, evData);
+                        }
 
-                            // Prefer anchoring to the label; fallback to group bbox
-                            const labelNode = d3.select(this).select("text.event-label").node();
-                            const targetNode = labelNode || this;
-                            const box = targetNode.getBoundingClientRect();
+                        // track movement/cancel across the page (finger may leave element bounds)
+                        const onMove = (e) => {
+                            if (moved) return;
+                            const dx = (e.clientX - startX), dy = (e.clientY - startY);
+                            if (Math.hypot(dx, dy) > MOVE_TOL) moved = true;
+                        };
+                        const onEnd = () => {
+                            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+                            window.removeEventListener('pointermove', onMove, { passive: true });
+                            window.removeEventListener('pointerup', onEnd, { passive: true });
+                            window.removeEventListener('pointercancel', onEnd, { passive: true });
+                            window.removeEventListener('pointerleave', onEnd, { passive: true });
+                        };
 
-                            if (window.InfoBox && typeof InfoBox.show === "function" && box) {
-                                InfoBox.show(evData, box);
-                            }
-                        } catch (_) { }
+                        window.addEventListener('pointermove', onMove, { passive: true });
+                        window.addEventListener('pointerup', onEnd, { passive: true });
+                        window.addEventListener('pointercancel', onEnd, { passive: true });
+                        window.addEventListener('pointerleave', onEnd, { passive: true });
                     })
-                    // 2) Long-press (pointerdown & hold) to open InfoBox
-                    .on('pointerdown', function (d3evt, evData) {
-                        try {
-                            // Don’t steal stylus/secondary buttons; only primary pointer
-                            if (d3evt.button != null && d3evt.button !== 0) return;
-
-                            const target = this;
-                            const startX = d3evt.clientX, startY = d3evt.clientY;
-                            let moved = false, timer = null;
-
-                            const clearAll = () => {
-                                if (timer) { clearTimeout(timer); timer = null; }
-                                target.removeEventListener('pointermove', onMove, { passive: true });
-                                target.removeEventListener('pointerup', onUp, { passive: true });
-                                target.removeEventListener('pointercancel', onUp, { passive: true });
-                                target.removeEventListener('pointerleave', onUp, { passive: true });
-                            };
-
-                            const onMove = (e) => {
-                                if (moved) return;
-                                const dx = (e.clientX - startX);
-                                const dy = (e.clientY - startY);
-                                if (Math.hypot(dx, dy) > MOVE_TOL) moved = true;
-                            };
-
-                            const onUp = () => { clearAll(); };
-
-                            target.addEventListener('pointermove', onMove, { passive: true });
-                            target.addEventListener('pointerup', onUp, { passive: true });
-                            target.addEventListener('pointercancel', onUp, { passive: true });
-                            target.addEventListener('pointerleave', onUp, { passive: true });
-
-                            timer = setTimeout(() => {
-                                if (moved) { clearAll(); return; }
-                                try {
-                                    const labelNode = d3.select(target).select("text.event-label").node();
-                                    const anchor = labelNode || target;
-                                    const box = anchor.getBoundingClientRect();
-                                    if (window.InfoBox && typeof InfoBox.show === "function" && box) {
-                                        InfoBox.show(evData, box);
-                                    }
-                                } finally {
-                                    clearAll();
-                                }
-                            }, PRESS_MS);
-                        } catch (_) { }
+                    .on("dblclick", function (evt, evData) {
+                        evt.preventDefault();
+                        evt.stopPropagation();
+                        openInfoFor(this, evData);
                     });
             })();
 
