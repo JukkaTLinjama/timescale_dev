@@ -652,7 +652,9 @@ let __firstRenderFired = false;
                 .classed("inactive", hasActive && state.activeTheme !== d.theme);
 
             // --- eventit: pysyvät absoluuttisessa y:ssä (state.y) ---
-            const evSel = g.select("g.events").selectAll("g.e").data(d.events, e => e.label + e.time_years);
+            // v47.9: stable key → no rebuild on tiny time_years drift
+            const evSel = g.select("g.events").selectAll("g.e")
+                .data(d.events, e => e.id || e.sourceId || e.label);
             const evEnt = evSel.enter().append("g").attr("class", "e");
             evEnt.append("line").attr("class", "event-line");
             evEnt.append("text")
@@ -812,6 +814,9 @@ let __firstRenderFired = false;
         const __now = Date.now();
         const __freshMotion = (__now - (window.__LAST_MOTION_TS__ || 0)) <= 800;   // käyttäjän liike viime aikoina
         const __isPresentTick = (__now - (window.__PRESENT_TICK__ || 0)) <= 250;   // redraw tuli juuri present-loopista
+        // v47.9: mark idle vs. motion to control label transitions in CSS
+        const __svg = d3.select(svg.node ? svg.node() : svg); // svg selection
+        __svg.classed('is-idle', !__freshMotion);
 
         try {
             // 0) prefocus päivitys: älä vaihda kohdetta hiljaisella present-tickillä
