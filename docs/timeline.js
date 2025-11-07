@@ -96,6 +96,8 @@ let __firstRenderFired = false;
 
     // --- axis group (kept last so it stays bright and never dimmed) ---
     const gAxis = gRoot.append("g").attr("class", "axis");
+    // v47.8: axis should never intercept gestures/clicks; visuals only
+    gAxis.style("pointer-events", "none");
 
     // minor grid lines (behind cards)
     const gMinor = gRoot.append("g").attr("class", "minor-grid");
@@ -333,9 +335,20 @@ let __firstRenderFired = false;
 
         // --- v47.6: prefocus candidates = base events + preview + present (when available)
         let candidates = Array.isArray(state.events) ? state.events.slice() : [];
-        // v47.7: if preview card is hidden by editor controls, drop preview events from prefocus candidates
-        const __previewHidden = document.querySelector('g.card[data-hidden-by-controls="1"]');
-        if (__previewHidden) candidates = candidates.filter(e => e && e.theme !== 'preview');
+        // v47.8: If the preview card is hidden (attribute OR CSS), drop its events from candidates.
+        {
+            const pc = document.querySelector('g.card[data-theme="preview"]');
+            if (pc) {
+                const cs = window.getComputedStyle(pc);
+                const isHidden = pc.getAttribute('data-hidden-by-controls') === '1'
+                    || cs.display === 'none'
+                    || cs.visibility === 'hidden'
+                    || parseFloat(cs.opacity || '1') === 0;
+                if (isHidden) {
+                    candidates = candidates.filter(e => e && e.theme !== 'preview');
+                }
+            }
+        }
 
         // Merge preview drafts only if the preview card is actually visible
         try {
@@ -362,7 +375,15 @@ let __firstRenderFired = false;
                 candidates = candidates.concat(presentList);
             }
         } catch (_) { }
-
+        // v47.8: When idle (no recent real motion), ignore "present" items as prefocus drivers.
+        // This prevents the 1 s clock tick from stealing prefocus.
+        {
+            const now = Date.now();
+            const freshMotion = (now - (window.__LAST_MOTION_TS__ || 0)) <= 800; // ms
+            if (!freshMotion) {
+                candidates = candidates.filter(e => e && e.theme !== 'present');
+            }
+        }
         // Keep only items that can be placed on the Y scale
         candidates = candidates.filter(e => typeof e?.time_years === 'number' && isFinite(e.time_years));
 
@@ -652,8 +673,8 @@ let __firstRenderFired = false;
                     .attr("y1", yy).attr("y2", yy)
                     .attr("stroke", "#aaa");
 
-                // v43.4: vertical halo around the data-driven prefocus
-                const yFoc = (state.__prefocusY != null) ? state.__prefocusY : getFocusAnchorY();
+                // v47.8: use frozen anchor to avoid 1 s "micro-shifts" when there is no real motion
+                const yFoc = (state.__prefocusY_frozen != null) ? state.__prefocusY_frozen : state.__prefocusY;
                 const textOffsetY = (Util && typeof Util.textHaloOffset === 'function') ? Util.textHaloOffset(yy, yFoc): 0;
 
                 gg.select("text.event-label")
@@ -787,10 +808,16 @@ let __firstRenderFired = false;
         // v45.5 cleanup: rendering only — no data loading or external side effects.
         if (__isRendering) { if (DBG) console.log("[render] skipped re-entrant applyZoom()"); return; }
         __isRendering = true;
+        // v47.8: detect passive 1 s "present tick" vs. real user motion
+        const __now = Date.now();
+        const __freshMotion = (__now - (window.__LAST_MOTION_TS__ || 0)) <= 800;   // käyttäjän liike viime aikoina
+        const __isPresentTick = (__now - (window.__PRESENT_TICK__ || 0)) <= 250;   // redraw tuli juuri present-loopista
 
         try {
-            // 0) compute data-driven prefocus for current transform
-            computePrefocusData();
+            // 0) prefocus päivitys: älä vaihda kohdetta hiljaisella present-tickillä
+            if (!(__isPresentTick && !__freshMotion)) {
+                computePrefocusData();
+            } // muussa tapauksessa pidetään aiempi state.__prefocusKey ja __prefocusY_frozen
 
             // 1) draw
             if (typeof drawAxis === "function") timed("drawAxis", () => safe(drawAxis, "drawAxis"));
@@ -809,11 +836,26 @@ let __firstRenderFired = false;
             */
             if (window.PrefocusInfo && typeof PrefocusInfo.onPrefocus === 'function') {
                 const key = (state && state.__prefocusKey) ? state.__prefocusKey : null;
+                // v47.8: Freeze the "halo anchor" (prefocus Y) between real motions.
+                // Only refresh the frozen anchor when there was recent user motion.
+                (function freezeHaloAnchor() {
+                    try {
+                        const now = Date.now();
+                        const freshMotion = (now - (window.__LAST_MOTION_TS__ || 0)) <= 800; // ms
+                        if (freshMotion) {
+                            state.__prefocusY_frozen = state.__prefocusY;
+                        } else if (state.__prefocusY_frozen == null) {
+                            // first run fallback
+                            state.__prefocusY_frozen = state.__prefocusY;
+                        }
+                    } catch { }
+                })();
 
                 const unchanged = (key === window.__LAST_PREFOCUS_KEY__);
                 const freshMotion = (Date.now() - window.__LAST_MOTION_TS__) <= 750;
 
-                if (!(unchanged && !freshMotion)) {
+                // Älä laukaise InfoBoxia passiivisella present-tickillä (joka ei seurannut oikeaa liikehdintää)
+                if (!(__isPresentTick && !freshMotion) && !(unchanged && !freshMotion)) {
                     const resolver = () => {
                         if (!key) return null;
                         const groupSel = d3.selectAll("g.e")
@@ -833,8 +875,20 @@ let __firstRenderFired = false;
                         if (!targetNode) return null;
 
                         // --- new guard: ensure element is still in DOM and visible ---
-                        const box = targetNode.getBoundingClientRect?.();
-                        if (!box || !Number.isFinite(box.top) || box.height <= 0) return null;
+                        let box = targetNode.getBoundingClientRect?.();
+                        // v47.8: if the label is fully clipped (height === 0), synthesize a small anchor box
+                        if (!box || !Number.isFinite(box.top) || box.height <= 0) {
+                            const r = svg.node().getBoundingClientRect();
+                            const cy = (state.height / 2);            // screen-space center Y in SVG coords
+                            // Build a tiny 1×1 box at the center hairline, near the card area
+                            box = {
+                                x: Math.round(r.left + r.width * 0.60),
+                                y: Math.round(r.top + cy),
+                                left: Math.round(r.left + r.width * 0.60),
+                                top: Math.round(r.top + cy),
+                                width: 1, height: 1, right: Math.round(r.left + r.width * 0.60) + 1, bottom: Math.round(r.top + cy) + 1
+                            };
+                        }
 
                         const data = groupSel.datum?.();
                         return (data) ? { box, data } : null;
