@@ -418,64 +418,39 @@ svg .zoomBar .hit {
     /* If/when you want the pad to handle zoom-only input, switch to:
      pointer-events: all; touch-action: none; */
 }
-/* --- Prefocus & halo section (v48) --- */
-
-/* EN: Prefocus highlight only (no scale here).
-   This rule adds weight and halo contrast but does NOT override transform. */
-text.event-label.prefocus {
-    font-weight: 800;
-    letter-spacing: 0.25px;
-    paint-order: stroke;
-    stroke: rgba(0, 0, 0, 0.40);
-    stroke-width: 0.9px;
-    /* keep transform untouched; scaling handled separately */
-    transition: none;
-}
-
-/* EN: Disable transitions while moving (zoom or scroll),
-   but do NOT cancel the existing transform (halo stays active). */
-svg:not(.is-idle) text.event-label {
-    transition: none !important;
-    /* no transform reset here on purpose */
-}
-
-/* EN: Always apply 1.5x scale to the focused label via CSS variable.
-   Idle state is solely used to enable/disable the easing (transition). */
-g.e.is-prefocus text.event-label {
-    --s: 1.5;
-    /* scale factor always on */
-}
-
-/* EN: While moving, disable easing (no animation, instant changes). */
-svg:not(.is-idle) text.event-label {
-    transition: none !important;
-    /* do NOT reset transform here */
-}
-
-/* EN: Base transform + easing. When is-idle turns on, the change to scale animates. */
+/* --- Prefocus & halo section (v48, unified) --- */
+/* EN: Single, consistent animation model:
+   - transform uses translateY(var(--ty)) + scale(var(--s))
+   - transition always enabled (no "transition: none" anywhere)
+   - prefocus sets --s and visual emphasis; JS only toggles classes/--ty
+*/
 text.event-label {
-    transition: transform .18s ease-out;
-    will-change: transform;
     transform: translateY(var(--ty, 0)) scale(var(--s, 1));
     transform-origin: 0% 50%;
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1);
+    will-change: transform;
 }
 
-/* EN: The horizontal event line of the focused element gets accent color. */
+/* EN: Prefocus growth + subtle halo. No transform override here, only --s variable. */
+g.e.is-prefocus text.event-label {
+    --s: 1.28;
+    /* target scale for focused label */
+    font-weight: 700;
+    /* emphasis */
+    letter-spacing: 0.25px;
+    paint-order: stroke;
+    /* light outline for readability */
+    stroke: rgba(0, 0, 0, .40);
+    stroke-width: .9px;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, .45));
+}
+
+/* EN: Focused horizontal tick line: accent and mild width change with easing. */
 g.e.is-prefocus line.event-line {
     stroke: var(--accent);
     stroke-width: 2px;
-    opacity: 0.95;
+    opacity: .95;
     transition: stroke-width .18s ease-out, opacity .18s ease-out;
-}
-
-/* EN: Base transform for all labels – GPU-accelerated halo translation + scale var.
-   Transition here gives smooth growth when idle state toggles. */
-text.event-label {
-    transition: transform .38s ease-out;
-    /* smooth scale-in/out */
-    will-change: transform;
-    transform: translateY(var(--ty, 0)) scale(var(--s, 1));
-    transform-origin: 0% 50%;
 }
 
 /* v42.3: Event "More info" popover (animated) */

@@ -317,11 +317,18 @@ let __firstRenderFired = false;
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
     let prefocusRaf = null;
+    // Stable key for data-join and prefocus matching.
+    // Prefer persistent ids; fallback to label+time (old behavior).
+    const keyOf = (e) => (e && (e.id ?? e.sourceId ?? (e.label + e.time_years)));
 
     // --- v43.4: Data-driven prefocus (no DOM/BBox feedback) ---
     function getFocusAnchorY() {
-        // Center hairline Y in gRoot's local coords (cards/text live here)
-        return (state.height / 2) - cfg.margin.top;
+        // Use the same midY as the center hairline, then convert to gRoot coords.
+        const h = state.height, w = state.width;
+        const geom = (window.CenterBand && CenterBand.compute)
+            ? CenterBand.compute(w, h, NaN, NaN)
+            : { midY: Math.round(h / 2) };
+        return geom.midY - cfg.margin.top;
     }
 
     function computePrefocusData() {
@@ -411,64 +418,67 @@ let __firstRenderFired = false;
             return;
         }
 
-        // 2) Use same radius/threshold logic as before
-        const prevKey = state.__prefocusKey;
-        // Build a more stable key:
-        // - For 'present' theme, ignore tiny time drift: strip trailing " (…ago)" and avoid time_years.
-        //   → key changes at most once per wall-clock second.
-        // - For others, keep the old behavior (label + time_years).
-        let candKey;
-        const baseLabel = (best.label || best.display_label || '').toString();
-        if (best.theme === 'present') {
-            // remove " (…ago)" if present → keeps "HH:MM:SS" stable during that second
-            const stable = baseLabel.replace(/\s*\(.*\)\s*$/, '');
-            candKey = `present@${stable}`;
-        } else {
-            candKey = baseLabel + best.time_years;
-        }
-        const viewH = innerHeight();
-        const R = Math.max(14, Math.min(48, viewH * 0.06));
-        const H = 10; // hysteresis
+        // 2) Apply distance threshold + hysteresis
+        const R = (cfg.prefocus && +cfg.prefocus.radiusPx) || 36;
+        // Small hysteresis smooths key swaps near the anchor (mobile jitter)
+        const H = (cfg.prefocus && +cfg.prefocus.hysteresisPx) || 6;
+        // Extra margin required to switch focus from previous target to a new one.
+        // Prevents A<->B flapping when both are similarly close.
+        const SWITCH_MARGIN = (cfg.prefocus && +cfg.prefocus.switchMarginPx) || 6;
 
+        const prevKey = state.__prefocusKey || null;
+        const candKey = keyOf(best);
+
+        // If we are already focused on the same event, allow slightly larger distance
         let allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
+
         // Sticky tolerance: if previous prefocus Y exists and the new best Y is very close,
         // allow a wider window (prevents 1 s present updates from kicking us out).
         {
             const prevY = state.__prefocusY;
             if (prevY != null) {
                 const bestY = state.y(best.time_years);
-                // base radius R already accounts for screen height; add a sticky margin
                 const STICKY = Math.max(12, Math.min(36, innerHeight() * 0.03));
                 if (Math.abs(bestY - prevY) <= STICKY) {
-                    // treat as if same target → give hysteresis headroom
-                    // (do not force key equality; we only widen acceptance)
-                    // NOTE: allowed is a const in original; re-declare as let above if needed
-                    // In this file allowed was 'const' — switch it to 'let' one line above:
-                    //   let allowed = (prevKey && prevKey === candKey) ? (R + H) : R;
                     allowed = Math.max(allowed, R + H);
                 }
             }
         }
 
+        // Guard against A<->B flapping near the anchor.
+        // Only switch to 'best' if it is clearly closer than the previous focused event.
+        if (prevKey && candKey !== prevKey) {
+            let prevEv = null;
+            for (const e of candidates) { if (keyOf(e) === prevKey) { prevEv = e; break; } }
+            if (prevEv) {
+                const prevDist = Math.abs((state._yMap?.get(prevEv) ?? state.y(prevEv.time_years)) - cy);
+                if (!(bestDist < prevDist - SWITCH_MARGIN)) {
+                    // Keep previous focus; update its Y to stay smooth with scroll
+                    const keepY = (state._yMap?.get(prevEv) ?? state.y(prevEv.time_years));
+                    state.__prefocusKey = prevKey;
+                    state.__prefocusY = keepY;
+                    return;
+                }
+            }
+        }
+        
         // 3) Only keep prefocus if within allowed distance + dead-band
         const newY = state.y(best.time_years);
-        const DB = 4; // v48: dead-band in pixels to avoid flicker on slow scroll & 1 Hz refresh
+        // DB=0: never quantize Y (smooth follow). You can set to 1 if you want a tiny noise guard.
+        const DB = 0;
 
-        // Keep previous focus if:
-        //  - new candidate is within allowed distance, AND
-        //  - there was a previous focus, AND
-        //  - screen-space movement is tiny (<= DB px)
         const prevY = state.__prefocusY;
         const tinyMove = (prevY != null) && (Math.abs(newY - prevY) <= DB);
 
         if (bestDist <= allowed) {
+            // Keep the previous key on tiny moves (prevents key flapping),
+            // BUT always update Y so the halo/offset moves smoothly with scroll.
             state.__prefocusKey = tinyMove ? state.__prefocusKey : candKey;
-            state.__prefocusY = tinyMove ? prevY : newY;
+            state.__prefocusY = newY;
         } else {
             state.__prefocusKey = null;
             state.__prefocusY = null;
         }
-
     }
 
     function markPrefocusClass() {
@@ -480,22 +490,15 @@ let __firstRenderFired = false;
 
         if (!key) return;
 
+        // Use the unified key function for matching (stable id or label+time)
         d3.selectAll("g.e")
-            .filter(d => {
-                if (!d) return false;
-                if (d.theme === 'present') {
-                    const stable = (d.label || '').toString().replace(/\s*\(.*\)\s*$/, '');
-                    return key === `present@${stable}`;
-                }
-                return key === ((d.label || d.display_label || '').toString() + d.time_years);
-            })
+            .filter(d => keyOf(d) === key)
             .each(function () {
                 const sel = d3.select(this);
                 sel.classed("is-prefocus", true);
                 sel.select("text.event-label").classed("prefocus", true);
             });
     }
-
 
     // --- Safe wrapper: requestPrefocusUpdate() ---
     // Older versions scheduled computePrefocusData + markPrefocusClass in a rAF.In v44 we no longer define it, so this stub prevents errors.
@@ -666,8 +669,8 @@ let __firstRenderFired = false;
 
             // --- eventit: pysyvät absoluuttisessa y:ssä (state.y) ---
             // v47.9: stable key → no rebuild on tiny time_years drift
-            const evSel = g.select("g.events").selectAll("g.e")
-                .data(d.events, e => e.id || e.sourceId || e.label);
+            const evSel = g.select("g.events").selectAll("g.e").data(d.events, keyOf);
+
             const evEnt = evSel.enter().append("g").attr("class", "e");
             evEnt.append("line").attr("class", "event-line");
             evEnt.append("text")
