@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v47.9   </title>
+        <title>History Timeline v47.92   </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v47.9 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v47.92 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -189,10 +189,11 @@
             Util.textHaloOffset = function (yEvt, yFoc) {
                 const R = 40, MAX = 8;
                 const dy = yEvt - yFoc, ady = Math.abs(dy);
-                if (ady === 0 || ady >= R) return 0;
+                if (ady <= 1 || ady >= R) return 0; // v48.fix: snap-to-zero near anchor (≤1 px)
                 const t = 1 - ady / R;
-                return Math.sign(dy) * MAX * Math.pow(t, 1.0);
+                return Math.sign(dy) * Math.round(MAX * Math.pow(t, 1.0));
             };
+
             // ---------------- Card text helpers (pure, DOM-free) ----------------
 
             /** Preferred display label for an event (falls back to 'label'). */
@@ -984,6 +985,7 @@
 
         let dwellTimer = null;
         let armTimer = null;
+        let lastShownTop = NaN;      // v48: popup guard anchor (screen Y of last shown box)
 
         let armed = false;               // becomes true only after viewport motion settles
         let disabled = false;            // set true while help panel (or other modal) is open
@@ -1040,7 +1042,14 @@
                     const r = (typeof resolver === 'function') ? resolver() : null;
                     if (!r || !r.box || !r.data) return;
                     if (window.InfoBox && InfoBox.show) {
+                        const top = Math.round(r.box.top || 0);
+                        const GUARD = 5; // v48: dead-band for popup re-open
+                        // If movement since last show is tiny, skip re-open to avoid flicker
+                        if (Number.isFinite(lastShownTop) && Math.abs(top - lastShownTop) <= GUARD) {
+                            return;
+                        }
                         InfoBox.show(r.data, r.box);
+                        lastShownTop = top;  // remember last anchor position
                         lastOpenAt = performance.now();
                     }
                 } catch { }

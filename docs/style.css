@@ -418,37 +418,66 @@ svg .zoomBar .hit {
     /* If/when you want the pad to handle zoom-only input, switch to:
      pointer-events: all; touch-action: none; */
 }
-/* v42: continuous focus highlight for the nearest-to-center EVENT (label only) *//* v43.2: Bigger, smoother pre-focus highlight */
+/* --- Prefocus & halo section (v48) --- */
+
+/* EN: Prefocus highlight only (no scale here).
+   This rule adds weight and halo contrast but does NOT override transform. */
 text.event-label.prefocus {
-    font-size: 13.5px;          /* was 12px */
-    font-weight: 800;           /* bolder */
+    font-weight: 800;
     letter-spacing: 0.25px;
-    /* Use transform for smooth scaling without layout jumps */
-    transform: scale(1.12);
-    transform-box: fill-box;    /* scale around the text's own box */
-    transform-origin: 0% 50%;   /* left-center keeps label aligned to tick */
-    /* Softer, longer ease-out */
-    transition: transform .18s ease-out,
-                font-size .18s ease-out,
-                letter-spacing .18s ease-out,
-                stroke-width .18s ease-out;
-    /* Slightly stronger readability outline */
     paint-order: stroke;
-    stroke: rgba(0,0,0,0.40);
-    stroke-width: 0.9px;        /* was 0.6px */
+    stroke: rgba(0, 0, 0, 0.40);
+    stroke-width: 0.9px;
+    /* keep transform untouched; scaling handled separately */
+    transition: none;
 }
 
-/* v43.2: Also highlight the horizontal event marker line for the prefocused item */
+/* EN: Disable transitions while moving (zoom or scroll),
+   but do NOT cancel the existing transform (halo stays active). */
+svg:not(.is-idle) text.event-label {
+    transition: none !important;
+    /* no transform reset here on purpose */
+}
+
+/* EN: Always apply 1.5x scale to the focused label via CSS variable.
+   Idle state is solely used to enable/disable the easing (transition). */
+g.e.is-prefocus text.event-label {
+    --s: 1.5;
+    /* scale factor always on */
+}
+
+/* EN: While moving, disable easing (no animation, instant changes). */
+svg:not(.is-idle) text.event-label {
+    transition: none !important;
+    /* do NOT reset transform here */
+}
+
+/* EN: Base transform + easing. When is-idle turns on, the change to scale animates. */
+text.event-label {
+    transition: transform .18s ease-out;
+    will-change: transform;
+    transform: translateY(var(--ty, 0)) scale(var(--s, 1));
+    transform-origin: 0% 50%;
+}
+
+/* EN: The horizontal event line of the focused element gets accent color. */
 g.e.is-prefocus line.event-line {
     stroke: var(--accent);
-    stroke-width: 2px;          /* thicker line under the focused label */
+    stroke-width: 2px;
     opacity: 0.95;
     transition: stroke-width .18s ease-out, opacity .18s ease-out;
 }
+
+/* EN: Base transform for all labels – GPU-accelerated halo translation + scale var.
+   Transition here gives smooth growth when idle state toggles. */
 text.event-label {
-    transition: transform 380ms ease-out;
+    transition: transform .38s ease-out;
+    /* smooth scale-in/out */
     will-change: transform;
+    transform: translateY(var(--ty, 0)) scale(var(--s, 1));
+    transform-origin: 0% 50%;
 }
+
 /* v42.3: Event "More info" popover (animated) */
 #event-info {
     position: fixed;

@@ -450,40 +450,53 @@ let __firstRenderFired = false;
             }
         }
 
-        // 3) Only keep prefocus if within allowed distance
+        // 3) Only keep prefocus if within allowed distance + dead-band
+        const newY = state.y(best.time_years);
+        const DB = 4; // v48: dead-band in pixels to avoid flicker on slow scroll & 1 Hz refresh
+
+        // Keep previous focus if:
+        //  - new candidate is within allowed distance, AND
+        //  - there was a previous focus, AND
+        //  - screen-space movement is tiny (<= DB px)
+        const prevY = state.__prefocusY;
+        const tinyMove = (prevY != null) && (Math.abs(newY - prevY) <= DB);
+
         if (bestDist <= allowed) {
-            state.__prefocusKey = candKey;
-            state.__prefocusY = state.y(best.time_years);
+            state.__prefocusKey = tinyMove ? state.__prefocusKey : candKey;
+            state.__prefocusY = tinyMove ? prevY : newY;
         } else {
             state.__prefocusKey = null;
             state.__prefocusY = null;
         }
+
     }
 
     function markPrefocusClass() {
         const key = state.__prefocusKey;
 
-        // Clear previous prefocus marks
+        // Clear previous marks
         d3.selectAll("text.event-label").classed("prefocus", false);
         d3.selectAll("g.e").classed("is-prefocus", false);
 
-        if (!key) return; // nothing nearby → nothing highlighted
+        if (!key) return;
 
-        // Mark both the event group and its label
         d3.selectAll("g.e")
             .filter(d => {
                 if (!d) return false;
                 if (d.theme === 'present') {
-                    const stable = (d.label || '').replace(/\s*\(.*\)\s*$/, '');
+                    const stable = (d.label || '').toString().replace(/\s*\(.*\)\s*$/, '');
                     return key === `present@${stable}`;
                 }
-                return key === (d.label + d.time_years);
+                return key === ((d.label || d.display_label || '').toString() + d.time_years);
             })
             .each(function () {
-                d3.select(this).classed("is-prefocus", true);
-                d3.select(this).select("text.event-label").classed("prefocus", true);
+                const sel = d3.select(this);
+                sel.classed("is-prefocus", true);
+                sel.select("text.event-label").classed("prefocus", true);
             });
     }
+
+
     // --- Safe wrapper: requestPrefocusUpdate() ---
     // Older versions scheduled computePrefocusData + markPrefocusClass in a rAF.In v44 we no longer define it, so this stub prevents errors.
     function requestPrefocusUpdate() {
@@ -666,7 +679,8 @@ let __firstRenderFired = false;
             evSel.exit().remove();
 
             evSel.merge(evEnt).each(function (e) {
-                const yy = state.y(e.time_years);
+                const yy0 = state.y(e.time_years);
+                const yy = Math.round(yy0); // v48: snap to device pixel
                 const gg = d3.select(this);
 
                 // Keep lines at data Y (axis-aligned, no visual offset)
@@ -675,15 +689,33 @@ let __firstRenderFired = false;
                     .attr("y1", yy).attr("y2", yy)
                     .attr("stroke", "#aaa");
 
-                // v47.8: use frozen anchor to avoid 1 s "micro-shifts" when there is no real motion
-                const yFoc = (state.__prefocusY_frozen != null) ? state.__prefocusY_frozen : state.__prefocusY;
-                const textOffsetY = (Util && typeof Util.textHaloOffset === 'function') ? Util.textHaloOffset(yy, yFoc): 0;
+                // v48: round anchor and offset to full device pixels
+                const yFocRaw = (state.__prefocusY_frozen != null) ? state.__prefocusY_frozen : state.__prefocusY;
+                const yFoc = (yFocRaw == null) ? yy : Math.round(yFocRaw);
+                let textOffsetY = (Util && typeof Util.textHaloOffset === 'function')
+                    ? Math.round(Util.textHaloOffset(yy, yFoc))
+                    : 0;
+
+                // Force zero halo on the current prefocus TARGET so it never “rides” the halo
+                const key = state.__prefocusKey;
+                if (key) {
+                    let isTarget = false;
+                    if (e.theme === 'present') {
+                        const stable = (e.label || e.display_label || '').toString().replace(/\s*\(.*\)\s*$/, '');
+                        isTarget = (key === `present@${stable}`);
+                    } else {
+                        const baseLabel = (e.label || e.display_label || '').toString();
+                        isTarget = (key === (baseLabel + e.time_years));
+                    }
+                    if (isTarget) textOffsetY = 0;
+                }
 
                 gg.select("text.event-label")
                     .attr("x", 12)
-                    .attr("y", yy) // keep data y fixed
-                    .style("transform", `translate(0px, ${textOffsetY}px)`)
+                    .attr("y", yy)                       // keep baseline at integer y (no layout thrash)
+                    .style("--ty", `${textOffsetY}px`)   // halo offset via CSS variable → GPU transform
                     .text(Util.eventTitleShort(e));
+
             });
 
             // v47.7: mobile-friendly double-tap and long-press (pointer-based)
@@ -812,11 +844,13 @@ let __firstRenderFired = false;
         __isRendering = true;
         // v47.8: detect passive 1 s "present tick" vs. real user motion
         const __now = Date.now();
-        const __freshMotion = (__now - (window.__LAST_MOTION_TS__ || 0)) <= 800;   // käyttäjän liike viime aikoina
-        const __isPresentTick = (__now - (window.__PRESENT_TICK__ || 0)) <= 250;   // redraw tuli juuri present-loopista
-        // v47.9: mark idle vs. motion to control label transitions in CSS
-        const __svg = d3.select(svg.node ? svg.node() : svg); // svg selection
-        __svg.classed('is-idle', !__freshMotion);
+        const __freshMotion = (__now - (window.__LAST_MOTION_TS__ || 0)) <= 800;
+        const __isPresentTick = (__now - (window.__PRESENT_TICK__ || 0)) <= 250;
+        // EN: Only treat as "idle" when there's neither recent user motion nor a present-loop repaint.
+        //     This prevents the 1 Hz clock refresh from toggling idle → transition on every second.
+        const __svg = d3.select(svg.node ? svg.node() : svg);
+        const __idle = (!__freshMotion) && (!__isPresentTick);
+        __svg.classed('is-idle', __idle);
 
         try {
             // 0) prefocus päivitys: älä vaihda kohdetta hiljaisella present-tickillä
@@ -848,10 +882,10 @@ let __firstRenderFired = false;
                         const now = Date.now();
                         const freshMotion = (now - (window.__LAST_MOTION_TS__ || 0)) <= 800; // ms
                         if (freshMotion) {
-                            state.__prefocusY_frozen = state.__prefocusY;
+                            state.__prefocusY_frozen = (state.__prefocusY == null) ? null : Math.round(state.__prefocusY);
                         } else if (state.__prefocusY_frozen == null) {
                             // first run fallback
-                            state.__prefocusY_frozen = state.__prefocusY;
+                            state.__prefocusY_frozen = (state.__prefocusY == null) ? null : Math.round(state.__prefocusY);
                         }
                     } catch { }
                 })();
