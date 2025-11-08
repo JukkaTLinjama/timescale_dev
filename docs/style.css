@@ -452,6 +452,12 @@ g.e.is-prefocus line.event-line {
     opacity: .95;
     transition: stroke-width .18s ease-out, opacity .18s ease-out;
 }
+/* v48: ensure smooth transform on active-layer too (override older rules) */
+/* EN: Active card lives under g.active-layer; keep the same transform transition so scale
+   eases in/out instead of jumping when prefocus toggles. */
+g.active-layer text.event-label {
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1) !important;
+}
 
 /* v42.3: Event "More info" popover (animated) */
 #event-info {

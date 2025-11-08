@@ -461,7 +461,7 @@ let __firstRenderFired = false;
                 }
             }
         }
-        
+
         // 3) Only keep prefocus if within allowed distance + dead-band
         const newY = state.y(best.time_years);
         // DB=0: never quantize Y (smooth follow). You can set to 1 if you want a tiny noise guard.
@@ -598,13 +598,12 @@ let __firstRenderFired = false;
             };
         });
 
-        // v40.3 fix: ensure previous active participates in the join/class update
-        while (gActive.node().firstChild) {
-            gCards.node().appendChild(gActive.node().firstChild);
-        }
+        /* v48: keep active card in gActive between renders (no re-parenting here) */
 
         const indent = 20;
-        const sel = gCards.selectAll("g.card").data(data, d => d.theme);
+        // EN: Bind over BOTH layers so the active card (living in gActive) is part of the same data-join.
+        // This prevents D3 from creating a duplicate card in gCards while one already exists in gActive.
+        const sel = gRoot.selectAll("g.card").data(data, d => d.theme);
         const ent = sel.enter().append("g").attr("class", "card");
 
         // --- two-layer card (no strokes/shadows) ---
@@ -625,6 +624,9 @@ let __firstRenderFired = false;
         ent.append("g").attr("class", "events");
         sel.exit().remove();
         const merged = sel.merge(ent);
+        // Tag cards with their theme for stable DOM moves (no re-parenting every frame)
+        ent.attr("data-theme", d => d.theme);
+        sel.attr("data-theme", d => d.theme);
 
         sel.merge(ent).each(function (d, i) {
             const g = d3.select(this);
@@ -678,7 +680,8 @@ let __firstRenderFired = false;
                 .attr("x", 18)
                 .attr("dy", "0.32em")
                 .style("transform-box", "fill-box")
-                .style("transform-origin", "center");
+                .style("transform-origin", "0% 50%"); // EN: stable origin matches CSS
+
             evSel.exit().remove();
 
             evSel.merge(evEnt).each(function (e) {
@@ -811,23 +814,38 @@ let __firstRenderFired = false;
         });
         merged.on("dblclick", function (event) { event.preventDefault(); event.stopPropagation(); }); 
 
-        // Move previous active back to cards, then lift the current active once.
-        while (gActive.node().firstChild) {
-            gCards.node().appendChild(gActive.node().firstChild);
-        }
+        // v48: stable active move without re-parenting every frame and without duplicates
+        // EN: Move only when the active THEME actually changes; ensure only one active card exists.
+        (function stableActiveMove() {
+            const nextTheme = state.activeTheme || null;
 
-        // v40.3: lift the current active once (previous active was returned before the join)
-        if (state.activeTheme) {
-            merged
-                .filter(d => d.theme === state.activeTheme)
-                .each(function () { gActive.node().appendChild(this); });
-        }
-        // --- v46.3: toggle global dim ONCE per render (outside per-card loop) ----
-        // EN: Dim all regular cards if a theme is active; keep axis + active bright.
+            // A) Return all cards in gActive that are NOT the intended nextTheme
+            gActive.selectAll("g.card").each(function (d) {
+                const th = d?.theme || this.getAttribute("data-theme");
+                if (!nextTheme || th !== nextTheme) {
+                    gCards.node().appendChild(this);
+                }
+            });
+
+            // B) If we should have an active card, lift it only if not already inside gActive
+            if (nextTheme) {
+                // Find the (single) card node for nextTheme across BOTH layers
+                const target = gRoot.selectAll("g.card").filter(dd => dd.theme === nextTheme).node();
+                if (target && target.parentNode !== gActive.node()) {
+                    gActive.node().appendChild(target);
+                }
+            }
+        })();
+
+        // EN: Only animate the dim layer when the target opacity actually changes (prevents flicker).
         const hasActiveNow = !!state.activeTheme;
-        gDim
-            .transition().duration(180)
-            .attr("opacity", hasActiveNow ? 0.45 : 0.0);
+        {
+            const targetOpacity = hasActiveNow ? 0.45 : 0.0;
+            if (state.__dimOpacityLast !== targetOpacity) {
+                state.__dimOpacityLast = targetOpacity;
+                gDim.transition().duration(180).attr("opacity", targetOpacity);
+            }
+        }
 
         // Keep final stacking order stable
         setZOrder();         // v40: ensure layer order right after activation change
@@ -901,14 +919,8 @@ let __firstRenderFired = false;
                     const resolver = () => {
                         if (!key) return null;
                         const groupSel = d3.selectAll("g.e")
-                            .filter(d => {
-                                if (!d) return false;
-                                if (d.theme === 'present') {
-                                    const stable = (d.label || '').replace(/\s*\(.*\)\s*$/, '');
-                                    return key === `present@${stable}`;
-                                }
-                                return key === (d.label + d.time_years);
-                            });
+                            // EN: Match using the same stable key that prefocus uses (id/sourceId or label+time).
+                            .filter(d => (!!d) && (keyOf(d) === key));
 
                         const groupNode = groupSel.node();
                         if (!groupNode) return null;
