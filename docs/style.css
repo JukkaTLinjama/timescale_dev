@@ -431,15 +431,14 @@ text.event-label {
     will-change: transform;
 }
 
-/* EN: Prefocus growth + subtle halo. No transform override here, only --s variable. */
+/* EN: Trigger transform transition reliably by changing the transform itself,
+   not a CSS variable inside transform. */
 g.e.is-prefocus text.event-label {
-    --s: 1.28;
-    /* target scale for focused label */
+    transform: translateY(var(--ty, 0)) scale(1.28);
+    /* direct change → always animates */
     font-weight: 700;
-    /* emphasis */
     letter-spacing: 0.25px;
     paint-order: stroke;
-    /* light outline for readability */
     stroke: rgba(0, 0, 0, .40);
     stroke-width: .9px;
     filter: drop-shadow(0 0 3px rgba(255, 255, 255, .45));
@@ -756,4 +755,10 @@ body.editor-open #event-info {
 #dimLayer {
     pointer-events: none;
     transition: opacity .18s ease;
+}
+/* v48.2: hard-disable native long-press UI on labels (iOS Safari) */
+svg text.event-label {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }

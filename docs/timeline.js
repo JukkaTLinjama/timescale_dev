@@ -39,6 +39,7 @@ if (typeof Util.cardMetrics !== "function") {
 let __isRendering = false;
 // Fire 'timeline:first-render' exactly once after the initial stable draw.
 let __firstRenderFired = false;
+let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smooth class toggle)
 
 (() => {
     const cfg = (window.TS_CFG || {});
@@ -323,12 +324,21 @@ let __firstRenderFired = false;
 
     // --- v43.4: Data-driven prefocus (no DOM/BBox feedback) ---
     function getFocusAnchorY() {
-        // Use the same midY as the center hairline, then convert to gRoot coords.
+        // Use same midY as the center hairline, but convert to gRoot coords
+        // AND compensate for asymmetric top/bottom margins so anchor == visual center.
         const h = state.height, w = state.width;
         const geom = (window.CenterBand && CenterBand.compute)
             ? CenterBand.compute(w, h, NaN, NaN)
             : { midY: Math.round(h / 2) };
-        return geom.midY - cfg.margin.top;
+
+        const top = cfg.margin.top || 0;
+        const bot = cfg.margin.bottom || 0;
+
+        // EN: subtract top (to move into gRoot), then compensate half of (bottom - top)
+        // so that cy matches the middle of the inner drawing area (labels’ y-scale space).
+        const cy = geom.midY - top - 0.5 * (bot - top);
+
+        return Math.round(cy);
     }
 
     function computePrefocusData() {
@@ -411,6 +421,19 @@ let __firstRenderFired = false;
                 bestDist = d;
             }
         }
+        // De-duplicate by stable key; prefer non-preview over preview
+        {
+            const byKey = new Map();
+            for (const e of candidates) {
+                const k = keyOf(e);
+                if (!k) continue;
+                const prev = byKey.get(k);
+                if (!prev) { byKey.set(k, e); continue; }
+                // prefer non-preview if duplicate
+                if ((prev.theme === "preview") && (e.theme !== "preview")) byKey.set(k, e);
+            }
+            candidates = Array.from(byKey.values());
+        }
 
         if (!best) {
             state.__prefocusKey = null;
@@ -484,20 +507,42 @@ let __firstRenderFired = false;
     function markPrefocusClass() {
         const key = state.__prefocusKey;
 
-        // Clear previous marks
-        d3.selectAll("text.event-label").classed("prefocus", false);
+        // Clear stale flags quickly; don't set the new one yet.
         d3.selectAll("g.e").classed("is-prefocus", false);
 
-        if (!key) return;
+        if (!key) { __prefocusNode = null; return; }
 
-        // Use the unified key function for matching (stable id or label+time)
-        d3.selectAll("g.e")
-            .filter(d => keyOf(d) === key)
-            .each(function () {
-                const sel = d3.select(this);
-                sel.classed("is-prefocus", true);
-                sel.select("text.event-label").classed("prefocus", true);
+        // Collect all matches across BOTH layers
+        const matches = [];
+        d3.selectAll("g.e").filter(d => keyOf(d) === key).each(function () { matches.push(this); });
+        if (!matches.length) { __prefocusNode = null; return; }
+
+        // Priority: 1) in active-layer, 2) non-preview card, 3) first
+        let chosen = null;
+        for (const n of matches) { if (n.closest && n.closest("g.active-layer")) { chosen = n; break; } }
+        if (!chosen) {
+            chosen = matches.find(n => {
+                const card = n.closest && n.closest("g.card");
+                const th = card && (d3.select(card).datum()?.theme || card.getAttribute("data-theme"));
+                return th !== "preview";
+            }) || matches[0];
+        }
+
+        // If the same node as last time, just re-apply (no delay)
+        if (chosen === __prefocusNode) {
+            d3.select(chosen).classed("is-prefocus", true);
+            return;
+        }
+
+        // New node: defer class add by two rAFs so the browser sees a before→after style change.
+        __prefocusNode = chosen;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                // re-check still valid in DOM
+                if (!__prefocusNode || !__prefocusNode.isConnected) return;
+                d3.select(__prefocusNode).classed("is-prefocus", true);
             });
+        });
     }
 
     // --- Safe wrapper: requestPrefocusUpdate() ---
@@ -680,11 +725,19 @@ let __firstRenderFired = false;
                 .attr("x", 18)
                 .attr("dy", "0.32em")
                 .style("transform-box", "fill-box")
-                .style("transform-origin", "0% 50%"); // EN: stable origin matches CSS
+                .style("transform-origin", "0% 50%")
+                // EN: inline transition so active-layer reparenting can't disable easing
+                .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
+                .style("will-change", "transform");
 
             evSel.exit().remove();
 
             evSel.merge(evEnt).each(function (e) {
+                // EN: keep inline transition across merges (some browsers drop it on reparent)
+                d3.select(this).select("text.event-label")
+                    .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
+                    .style("will-change", "transform");
+
                 const yy0 = state.y(e.time_years);
                 const yy = Math.round(yy0); // v48: snap to device pixel
                 const gg = d3.select(this);
@@ -704,16 +757,13 @@ let __firstRenderFired = false;
 
                 // Force zero halo on the current prefocus TARGET so it never “rides” the halo
                 const key = state.__prefocusKey;
-                if (key) {
-                    let isTarget = false;
-                    if (e.theme === 'present') {
-                        const stable = (e.label || e.display_label || '').toString().replace(/\s*\(.*\)\s*$/, '');
-                        isTarget = (key === `present@${stable}`);
-                    } else {
-                        const baseLabel = (e.label || e.display_label || '').toString();
-                        isTarget = (key === (baseLabel + e.time_years));
+                // Force zero halo on the current prefocus TARGET so it never “rides” the halo
+                const prefKey = state.__prefocusKey;
+                // EN: Use the same stable key as elsewhere (keyOf). Old label+time comparison caused mismatches.
+                if (prefKey && typeof keyOf === "function") {
+                    if (keyOf(e) === prefKey) {
+                        textOffsetY = 0;
                     }
-                    if (isTarget) textOffsetY = 0;
                 }
 
                 gg.select("text.event-label")
@@ -750,6 +800,9 @@ let __firstRenderFired = false;
                     // help the browser: avoid double-tap zoom stealing the gesture
                     .style("touch-action", "manipulation")
                     .on("pointerdown", function (d3evt, evData) {
+                        // EN: prevent native long-press selection / callout stealing our timer
+                        d3evt.preventDefault();
+                        d3evt.stopPropagation();
                         // primary pointer only
                         if (d3evt.button != null && d3evt.button !== 0) return;
 
@@ -793,11 +846,17 @@ let __firstRenderFired = false;
                         window.addEventListener('pointercancel', onEnd, { passive: true });
                         window.addEventListener('pointerleave', onEnd, { passive: true });
                     })
+                    .on("contextmenu", function (evt) {
+                        // EN: iOS/Android long-press menu
+                        evt.preventDefault();
+                        evt.stopPropagation();
+                    })
                     .on("dblclick", function (evt, evData) {
                         evt.preventDefault();
                         evt.stopPropagation();
                         openInfoFor(this, evData);
                     });
+                    
             })();
 
         });
@@ -809,6 +868,8 @@ let __firstRenderFired = false;
 
             if (state.activeTheme === d.theme) return; // no toggle-off
             state.activeTheme = d.theme;               // set new active
+            console.log("[debug] re-render", state.activeTheme);
+
             drawCards();                               // re-render → classes & move to gActive
             setZOrder();                               // keep layers correct
         });
@@ -886,7 +947,12 @@ let __firstRenderFired = false;
             for (const e of state.events) state._yMap.set(e, state.y(e.time_years));
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
-            markPrefocusClass();
+            // EN: Defer class toggle to next frame so CSS transition sees a before→after change (fixes jump on active card).
+            if (window.__mpfRaf) cancelAnimationFrame(window.__mpfRaf);
+            window.__mpfRaf = requestAnimationFrame(() => {
+                try { markPrefocusClass(); } finally { window.__mpfRaf = null; }
+            });
+
                     /* PrefocusInfo: request popup only after we know the current prefocus target.
             - key: a stable identifier for the focused event (matches how you build the prefocus key)
             - resolver(): computes the event label's bounding box and returns { box, data } for positioning
