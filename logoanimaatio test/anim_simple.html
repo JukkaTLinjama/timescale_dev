@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Logoanimaatio – testi</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 40px;
+            background: #333;
+            /* harmaa tausta, että musta logo näkyy */
+            display: flex;
+            justify-content: center;
+        }
+
+        #animation_container {
+            position: relative;
+            width: 980px;
+            height: 400px;
+            background: #333;
+            /* vain testin ajaksi */
+            margin: 0 auto;
+        }
+
+        #canvas {
+            position: absolute;
+            display: block;
+            width: 980px;
+            height: 400px;
+            background: #ffffff;
+            /* valkoinen tausta, helppo nähdä */
+        }
+
+        #dom_overlay_container {
+            pointer-events: none;
+            overflow: hidden;
+            width: 980px;
+            height: 400px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="animation_container">
+        <canvas id="canvas" width="980" height="400"></canvas>
+        <div id="dom_overlay_container"></div>
+    </div>
+
+    <!-- CreateJS CDN -->
+    <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+
+    <!-- Adobe Animate -export (sun logoanimaatio.js) -->
+    <script src="logoanimaatio.js"></script>
+
+<script>
+    var canvas, stage, exportRoot, anim_container, dom_overlay_container;
+
+    function init() {
+        canvas = document.getElementById("canvas");
+        anim_container = document.getElementById("animation_container");
+        dom_overlay_container = document.getElementById("dom_overlay_container");
+
+        // hae kompositio ID:llä, joka on lib.properties.id
+        var comp = AdobeAn.getComposition("F5BBD970472E46F3A57B62AB20F817AB");
+        var lib = comp.getLibrary();
+
+        // kertatoisto: loop = false
+        exportRoot = new lib.logoanimaatio3(null, 0, false);
+
+        stage = new lib.Stage(canvas);
+        stage.addChild(exportRoot);
+
+        // 🔍 TÄMÄ korjaa pikseliterävyyden (Retina / HiDPI)
+        AdobeAn.makeResponsive(true, 'width', false, 1, [
+            canvas,
+            anim_container,
+            dom_overlay_container
+        ]);
+
+        createjs.Ticker.framerate = lib.properties.fps;
+        createjs.Ticker.addEventListener("tick", stage);
+    }
+
+    window.addEventListener('load', init);
+</script>
+
+</body>
+
+</html>

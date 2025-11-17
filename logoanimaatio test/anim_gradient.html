@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Logoanimaatio – gradient + läpinäkyvä</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            /* taustalle väriliuku */
+            background: linear-gradient(135deg, #0b1020 0%, #203a43 50%, #2c7744 100%);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        #animation_container {
+            position: relative;
+            width: 980px;
+            height: 400px;
+            background: transparent;
+            margin: 0 auto;
+        }
+
+        #canvas {
+            position: absolute;
+            display: block;
+            width: 980px;
+            height: 400px;
+            background: transparent;
+            /* EI taustaa */
+        }
+
+        #dom_overlay_container {
+            pointer-events: none;
+            overflow: hidden;
+            width: 980px;
+            height: 400px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            display: block;
+            background: transparent;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="animation_container">
+        <canvas id="canvas" width="980" height="400"></canvas>
+        <div id="dom_overlay_container"></div>
+    </div>
+
+    <!-- CreateJS CDN -->
+    <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+
+    <!-- Tämä on se nykyinen logoanimaatio.js, jota korjasit -->
+    <script src="logoanimaatio.js"></script>
+
+    <script>
+        var canvas, stage, exportRoot, anim_container, dom_overlay_container;
+
+        function init() {
+            canvas = document.getElementById("canvas");
+            anim_container = document.getElementById("animation_container");
+            dom_overlay_container = document.getElementById("dom_overlay_container");
+
+            var comp = AdobeAn.getComposition("F5BBD970472E46F3A57B62AB20F817AB");
+            var lib = comp.getLibrary();
+
+            // kertatoisto: loop = false (on myös js-tiedostossa)
+            exportRoot = new lib.logoanimaatio3(null, 0, false);
+
+            stage = new lib.Stage(canvas);
+            stage.addChild(exportRoot);
+
+            // Retina-terävyys / responsiivisuus
+            AdobeAn.makeResponsive(true, 'width', false, 1, [
+                canvas,
+                anim_container,
+                dom_overlay_container
+            ]);
+
+            createjs.Ticker.framerate = lib.properties.fps;
+            createjs.Ticker.addEventListener("tick", stage);
+        }
+
+        window.addEventListener('load', init);
+    </script>
+
+</body>
+
+</html>
