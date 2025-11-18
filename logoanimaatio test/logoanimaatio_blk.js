@@ -1,0 +1,248 @@
+
+(function (cjs, an) {
+
+    var p; // shortcut to reference prototypes
+    var lib = {}; var ss = {}; var img = {};
+    lib.ssMetadata = [];
+
+
+    // symbols:
+    // helper functions:
+
+    function mc_symbol_clone() {
+        var clone = this._cloneProps(new this.constructor(this.mode, this.startPosition, this.loop));
+        clone.gotoAndStop(this.currentFrame);
+        clone.paused = this.paused;
+        clone.framerate = this.framerate;
+        return clone;
+    }
+
+    function getMCSymbolPrototype(symbol, nominalBounds, frameBounds) {
+        var prototype = cjs.extend(symbol, cjs.MovieClip);
+        prototype.clone = mc_symbol_clone;
+        prototype.nominalBounds = nominalBounds;
+        prototype.frameBounds = frameBounds;
+        return prototype;
+    }
+
+
+    (lib.teksti = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // Layer_1
+        this.shape = new cjs.Shape();
+        this.shape.graphics.f("#888888").s().p("AmDCVIAAkWIhtAAIAAgRIDrAAIAAARIhtAAIAAEWgACqCTIAAkkIBSAAQApAAAdAeQAdAeAAAoQgBAbgLAUQgMAXgWAOIAAAAQgRAMgXADIhPABIAABcgAC6AlIBAAAQAiABAYgZQAZgXAAgjQAAgigZgYQgYgZgiABIhAAAgAXjCTIgdhFIiVAAIgdBFIgVAAIB9kmIB9EmgAU3A9ICJAAIhEiggALjCTIgdhFIiWAAIgcBFIgVAAIB9kmIB8EmgAI3A9ICIAAIhDiggAsbCOQgogKgRgbIAJgNQAQAZAkAJQARAFAOABQAegBAUgTQASgTAAgeQABgngngQIgzgJQgcgFgSgMQgagSAAgiQAAggAXgWQAXgWAiAAQATAAASAGQATAIALAKIgIAPQgYgWgigCQgdAAgSASQgSASAAAZQAAAVARAPQAQAOAZADQBoALAABIQAAAhgYAYQgYAYglAAQgQAAgTgFgA0UCTIgehFIiVAAIgcBFIgVAAIB8kmIB+EmgA3BA9ICJAAIhEiggAPiCSQgrAAgdghIAIgOQAdAdAlAAQAiAAAYgXQAXgZABghIAAjCIASAAIAADHQgCAogdAbQgcAbgpAAgAhBCSIAAkmIAQAAIAAEmgAw5CSIAAkmIAQAAIAAEmg");
+
+        this.timeline.addTween(cjs.Tween.get(this.shape).wait(1));
+
+    }).prototype = getMCSymbolPrototype(lib.teksti, new cjs.Rectangle(-152.9, -14.9, 305.8, 29.8), null);
+
+
+    (lib.pyorre2 = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // Layer_1
+        this.shape = new cjs.Shape();
+        this.shape.graphics.f("#888888").s().p("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");
+        this.shape.setTransform(0, 0.025);
+
+        this.timeline.addTween(cjs.Tween.get(this.shape).wait(1));
+
+    }).prototype = getMCSymbolPrototype(lib.pyorre2, new cjs.Rectangle(-133, -135.4, 266, 270.9), null);
+
+
+    (lib.ovi = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // Layer_1
+        this.shape = new cjs.Shape();
+        this.shape.graphics.f("#E74B2A").s().p("AAACJQiOgCAAABQgBhhAghOQAmhdBBgEQBJgFAoBjQAZA9ANB3g");
+        this.shape.setTransform(-0.0033, -0.0098);
+
+        this.timeline.addTween(cjs.Tween.get(this.shape).wait(1));
+
+    }).prototype = getMCSymbolPrototype(lib.ovi, new cjs.Rectangle(-14.3, -13.7, 28.6, 27.5), null);
+
+
+    (lib.kota = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // Layer_1
+        this.shape = new cjs.Shape();
+        this.shape.graphics.f("#000000").s().p("Ag1NmQoXALg9gLIgtgGIgggDQARgpEcp8QC4maBdkTIhzi9QhQiEgkg6QACACAyATQA0AVAJAOICUDpQAhhjAoh7QADgIAkABQAjABADgGQgyCbg1CbQCTDsD9HHQEGHYCIDdQgDgEgnAIIgsAIQltgIlJgDg");
+        this.shape.setTransform(0.025, -0.025);
+
+        this.timeline.addTween(cjs.Tween.get(this.shape).wait(1));
+
+    }).prototype = getMCSymbolPrototype(lib.kota, new cjs.Rectangle(-72.6, -88.1, 145.3, 176.2), null);
+
+
+    (lib.content = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // ovi
+        this.instance = new lib.ovi();
+        this.instance.parent = this;
+        this.instance.setTransform(-5.1, 70.65);
+        this.instance.alpha = 0;
+        this.instance._off = true;
+
+        this.timeline.addTween(cjs.Tween.get(this.instance).wait(33).to({ _off: false }, 0).to({ alpha: 1 }, 55).wait(1));
+
+        // kota
+        this.instance_1 = new lib.kota();
+        this.instance_1.parent = this;
+        this.instance_1.setTransform(4.75, -8.55);
+
+        this.timeline.addTween(cjs.Tween.get(this.instance_1).wait(89));
+
+        // teksti
+        this.instance_2 = new lib.teksti();
+        this.instance_2.parent = this;
+        this.instance_2.setTransform(0, 130.5);
+        this.instance_2.alpha = 0;
+        this.instance_2._off = true;
+
+        this.timeline.addTween(cjs.Tween.get(this.instance_2).wait(45).to({ _off: false }, 0).to({ y: 120.5, alpha: 1 }, 27, cjs.Ease.sineOut).wait(17));
+
+        // Layer_5 (mask)
+        var mask = new cjs.Shape();
+        mask._off = true;
+        mask.graphics.p("A6FSDMAAAgkFMA0LAAAMAAAAkFg");
+        mask.setTransform(1, -37.95);
+
+        // pyorre
+        this.instance_3 = new lib.pyorre2();
+        this.instance_3.parent = this;
+        this.instance_3.setTransform(-1.35, 0, 0.2, 0.2, -97.9959, 0, 0, -0.3, 0.2);
+        this.instance_3.alpha = 0;
+
+        var maskedShapeInstanceList = [this.instance_3];
+
+        for (var shapedInstanceItr = 0; shapedInstanceItr < maskedShapeInstanceList.length; shapedInstanceItr++) {
+            maskedShapeInstanceList[shapedInstanceItr].mask = mask;
+        }
+
+        this.timeline.addTween(cjs.Tween.get(this.instance_3).to({ regX: 0, regY: 0, scaleX: 1, scaleY: 1, rotation: 0, alpha: 1 }, 72, cjs.Ease.sineOut).wait(17));
+
+    }).prototype = p = new cjs.MovieClip();
+    p.nominalBounds = new cjs.Rectangle(-152.9, -135.6, 305.8, 281);
+
+
+    // stage content:
+    (lib.logoanimaatio3 = function (mode, startPosition, loop) {
+        this.initialize(mode, startPosition, loop, {});
+
+        // content
+        this.instance = new lib.content(null, 0, false);
+        this.instance.parent = this;
+        this.instance.setTransform(490, 200);
+
+        this.timeline.addTween(cjs.Tween.get(this.instance).wait(1));
+
+    }).prototype = p = new cjs.MovieClip();
+    p.nominalBounds = new cjs.Rectangle(814, 246.6, -156, 32.900000000000006);
+    // library properties:
+    lib.properties = {
+        id: 'F5BBD970472E46F3A57B62AB20F817AB',
+        width: 980,
+        height: 400,
+        fps: 24,
+        color: "rgba(0,0,0,0)", // läpinäkyvä tausta
+        opacity: 1.00,
+        manifest: [],
+        preloads: []
+    };
+
+
+    // bootstrap callback support:
+
+    (lib.Stage = function (canvas) {
+        createjs.Stage.call(this, canvas);
+    }).prototype = p = new createjs.Stage();
+
+    p.setAutoPlay = function (autoPlay) {
+        this.tickEnabled = autoPlay;
+    }
+    p.play = function () { this.tickEnabled = true; this.getChildAt(0).gotoAndPlay(this.getTimelinePosition()) }
+    p.stop = function (ms) { if (ms) this.seek(ms); this.tickEnabled = false; }
+    p.seek = function (ms) { this.tickEnabled = true; this.getChildAt(0).gotoAndStop(lib.properties.fps * ms / 1000); }
+    p.getDuration = function () { return this.getChildAt(0).totalFrames / lib.properties.fps * 1000; }
+
+    p.getTimelinePosition = function () { return this.getChildAt(0).currentFrame / lib.properties.fps * 1000; }
+
+    an.bootcompsLoaded = an.bootcompsLoaded || [];
+    if (!an.bootstrapListeners) {
+        an.bootstrapListeners = [];
+    }
+
+    an.bootstrapCallback = function (fnCallback) {
+        an.bootstrapListeners.push(fnCallback);
+        if (an.bootcompsLoaded.length > 0) {
+            for (var i = 0; i < an.bootcompsLoaded.length; ++i) {
+                fnCallback(an.bootcompsLoaded[i]);
+            }
+        }
+    };
+
+    an.compositions = an.compositions || {};
+    an.compositions['F5BBD970472E46F3A57B62AB20F817AB'] = {
+        getStage: function () { return exportRoot.getStage(); },
+        getLibrary: function () { return lib; },
+        getSpriteSheet: function () { return ss; },
+        getImages: function () { return img; }
+    };
+
+    an.compositionLoaded = function (id) {
+        an.bootcompsLoaded.push(id);
+        for (var j = 0; j < an.bootstrapListeners.length; j++) {
+            an.bootstrapListeners[j](id);
+        }
+    }
+
+    an.getComposition = function (id) {
+        return an.compositions[id];
+    }
+
+
+    an.makeResponsive = function (isResp, respDim, isScale, scaleType, domContainers) {
+        var lastW, lastH, lastS = 1;
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        function resizeCanvas() {
+            var w = lib.properties.width, h = lib.properties.height;
+            var iw = window.innerWidth, ih = window.innerHeight;
+            var pRatio = window.devicePixelRatio || 1, xRatio = iw / w, yRatio = ih / h, sRatio = 1;
+            if (isResp) {
+                if ((respDim == 'width' && lastW == iw) || (respDim == 'height' && lastH == ih)) {
+                    sRatio = lastS;
+                }
+                else if (!isScale) {
+                    if (iw < w || ih < h)
+                        sRatio = Math.min(xRatio, yRatio);
+                }
+                else if (scaleType == 1) {
+                    sRatio = Math.min(xRatio, yRatio);
+                }
+                else if (scaleType == 2) {
+                    sRatio = Math.max(xRatio, yRatio);
+                }
+            }
+            domContainers[0].width = w * pRatio * sRatio;
+            domContainers[0].height = h * pRatio * sRatio;
+            domContainers.forEach(function (container) {
+                container.style.width = w * sRatio + 'px';
+                container.style.height = h * sRatio + 'px';
+            });
+            stage.scaleX = pRatio * sRatio;
+            stage.scaleY = pRatio * sRatio;
+            lastW = iw; lastH = ih; lastS = sRatio;
+            stage.tickOnUpdate = false;
+            stage.update();
+            stage.tickOnUpdate = true;
+        }
+    }
+
+
+})(createjs = createjs || {}, AdobeAn = AdobeAn || {});
+var createjs, AdobeAn;
