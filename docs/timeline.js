@@ -88,15 +88,19 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         .attr("y", 0)
         .attr("width", 0)                // set later in layout()
         .attr("height", 0)
-        .attr("fill", "#222")   // dark dim color
+        .attr("fill", "#222")            // dark dim color
         .attr("opacity", 0)
         .style("pointer-events", "none");  // EN: do not block clicks
 
-    // --- group for the active card (always above dim) ---
+    // v48.4: overlay layer for fully bright active card (static clone above dim)
+    const gActiveOverlay = gRoot.append("g").attr("id", "gActiveOverlay");
+
+    // --- group for the active card (kept for compatibility; no cards moved here in v48.4) ---
     const gActive = gRoot.append("g").attr("class", "active-layer");
 
     // --- axis group (kept last so it stays bright and never dimmed) ---
     const gAxis = gRoot.append("g").attr("class", "axis");
+
     // v47.8: axis should never intercept gestures/clicks; visuals only
     gAxis.style("pointer-events", "none");
 
@@ -151,11 +155,15 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
     // --- apufunktiot ------------------------------------
     // --- v46.3: enforce correct layer order (cards → dim → active → axis) ---
+
     function setZOrder() {
-        gCards.lower();   // 1. regular cards at bottom
-        gDim.raise();     // 2. global dim layer above passive cards
-        gActive.raise();  // 3. active card(s) above dim
-        gAxis.raise();    // 4. axis always on top (never dimmed)
+        gCards.lower();         // 1. all cards
+        gDim.raise();           // 2. global dim layer
+
+        gActiveOverlay.raise(); // 3. overlay-card ABOVE dim (this fixes dimming)
+
+        gActive.raise();        // 4. legacy active-layer (empty in v48.4)
+        gAxis.raise();          // 5. axis always top
     }
 
     // v44.1 – scale-aware pan bounds using your tuned base (0.6 × h)
@@ -506,20 +514,32 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
     function markPrefocusClass() {
         const key = state.__prefocusKey;
+        const all = d3.selectAll("g.e");
 
-        // Clear stale flags quickly; don't set the new one yet.
-        d3.selectAll("g.e").classed("is-prefocus", false);
+        // Ei prefokusta → tyhjennä ja pois
+        if (!key) {
+            all.classed("is-prefocus", false);
+            __prefocusNode = null;
+            return;
+        }
 
-        if (!key) { __prefocusNode = null; return; }
-
-        // Collect all matches across BOTH layers
+        // Kerää kaikki osumat MOLEMPISTA layereista
         const matches = [];
-        d3.selectAll("g.e").filter(d => keyOf(d) === key).each(function () { matches.push(this); });
-        if (!matches.length) { __prefocusNode = null; return; }
+        all.filter(d => keyOf(d) === key).each(function () { matches.push(this); });
+        if (!matches.length) {
+            all.classed("is-prefocus", false);
+            __prefocusNode = null;
+            return;
+        }
 
-        // Priority: 1) in active-layer, 2) non-preview card, 3) first
+        // Prioriteetti: 1) active-layer, 2) ei-preview-kortti, 3) ensimmäinen
         let chosen = null;
-        for (const n of matches) { if (n.closest && n.closest("g.active-layer")) { chosen = n; break; } }
+        for (const n of matches) {
+            if (n.closest && n.closest("g.active-layer")) {
+                chosen = n;
+                break;
+            }
+        }
         if (!chosen) {
             chosen = matches.find(n => {
                 const card = n.closest && n.closest("g.card");
@@ -528,21 +548,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             }) || matches[0];
         }
 
-        // If the same node as last time, just re-apply (no delay)
-        if (chosen === __prefocusNode) {
-            d3.select(chosen).classed("is-prefocus", true);
-            return;
-        }
-
-        // New node: defer class add by two rAFs so the browser sees a before→after style change.
-        __prefocusNode = chosen;
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                // re-check still valid in DOM
-                if (!__prefocusNode || !__prefocusNode.isConnected) return;
-                d3.select(__prefocusNode).classed("is-prefocus", true);
-            });
+        // Yksi selkeä before→after: vain chosen saa is-prefocus
+        all.classed("is-prefocus", function () {
+            return this === chosen;
         });
+
+        __prefocusNode = chosen;
     }
 
     // --- Safe wrapper: requestPrefocusUpdate() ---
@@ -646,9 +657,9 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         /* v48: keep active card in gActive between renders (no re-parenting here) */
 
         const indent = 20;
-        // EN: Bind over BOTH layers so the active card (living in gActive) is part of the same data-join.
-        // This prevents D3 from creating a duplicate card in gCards while one already exists in gActive.
-        const sel = gRoot.selectAll("g.card").data(data, d => d.theme);
+        // v48.4: All real cards live in gCards; overlay lives in gActiveOverlay without data.
+        // EN: Bind data only to the real cards, not the overlay clone.
+        const sel = gCards.selectAll("g.card").data(data, d => d.theme);
         const ent = sel.enter().append("g").attr("class", "card");
 
         // --- two-layer card (no strokes/shadows) ---
@@ -724,9 +735,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 .attr("class", "event-label")
                 .attr("x", 18)
                 .attr("dy", "0.32em")
-                .style("transform-box", "fill-box")
+                // EN: use view-box instead of fill-box so the origin doesn't change
+                // when the card moves between g.cards and g.active-layer (no jump on mobile).
+                .style("transform-box", "view-box")
                 .style("transform-origin", "0% 50%")
-                // EN: inline transition so active-layer reparenting can't disable easing
+                // inline transition so active-layer reparenting can't disable easing
                 .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
                 .style("will-change", "transform");
 
@@ -735,6 +748,8 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             evSel.merge(evEnt).each(function (e) {
                 // EN: keep inline transition across merges (some browsers drop it on reparent)
                 d3.select(this).select("text.event-label")
+                    .style("transform-box", "view-box")      // keep origin stable across layers
+                    .style("transform-origin", "0% 50%")
                     .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
                     .style("will-change", "transform");
 
@@ -764,6 +779,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     if (keyOf(e) === prefKey) {
                         textOffsetY = 0;
                     }
+                }
+                // NEW v48.3: on active theme’s card, never apply vertical halo offset.
+                // This removes the “jump down ~25 %” when the active card crosses the center line.
+                if (state.activeTheme && e.theme === state.activeTheme) {
+                    textOffsetY = 0;
                 }
 
                 gg.select("text.event-label")
@@ -875,27 +895,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         });
         merged.on("dblclick", function (event) { event.preventDefault(); event.stopPropagation(); }); 
 
-        // v48: stable active move without re-parenting every frame and without duplicates
-        // EN: Move only when the active THEME actually changes; ensure only one active card exists.
+        // v48.4: stableActiveMove no longer re-parents cards.
+        // EN: The visual focus is now provided by a full-card overlay above the dim layer.
+        // The original cards always stay in gCards to keep all transitions smooth.
         (function stableActiveMove() {
-            const nextTheme = state.activeTheme || null;
-
-            // A) Return all cards in gActive that are NOT the intended nextTheme
-            gActive.selectAll("g.card").each(function (d) {
-                const th = d?.theme || this.getAttribute("data-theme");
-                if (!nextTheme || th !== nextTheme) {
-                    gCards.node().appendChild(this);
-                }
-            });
-
-            // B) If we should have an active card, lift it only if not already inside gActive
-            if (nextTheme) {
-                // Find the (single) card node for nextTheme across BOTH layers
-                const target = gRoot.selectAll("g.card").filter(dd => dd.theme === nextTheme).node();
-                if (target && target.parentNode !== gActive.node()) {
-                    gActive.node().appendChild(target);
-                }
-            }
+            // no-op in v48.4
         })();
 
         // EN: Only animate the dim layer when the target opacity actually changes (prevents flicker).
@@ -908,7 +912,55 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             }
         }
 
-        // Keep final stacking order stable
+        /* v48.4 – Full active card overlay above dim mask.
+           EN:
+           - Clone the active card into #gActiveOverlay (above the dim layer).
+           - Copy event data to the clone so prefocus can target it.
+           - Re-apply prefocus classes after cloning so the bright overlay
+             animates scale exactly kuten alkuperäinen kortti.
+        */
+        (function renderActiveOverlay() {
+            const active = state.activeTheme;
+            const gOverlay = d3.select("#gActiveOverlay");
+
+            // 1) Clear previous overlay
+            gOverlay.selectAll("*").remove();
+            if (!active) return;
+
+            // 2) Find the original active card only from the real cards layer
+            const src = gCards.selectAll("g.card")
+                .filter(d => d && d.theme === active)
+                .node();
+            if (!src) return;
+
+            // 3) Clone the whole card (rects + lines + texts)
+            const clone = src.cloneNode(true);
+            gOverlay.node().appendChild(clone);
+
+            // 4) Copy bound event data into overlay <g.e> nodes
+            try {
+                const srcEvents = d3.select(src).selectAll("g.e").nodes();
+                const overlayEvents = d3.select(clone).selectAll("g.e");
+
+                overlayEvents.each(function (_, i) {
+                    const srcNode = srcEvents[i];
+                    if (!srcNode) return;
+                    const d = d3.select(srcNode).datum();
+                    if (d) d3.select(this).datum(d);
+                });
+            } catch (e) {
+                if (DBG) console.warn("[v48.4] overlay data copy failed", e);
+            }
+
+            // 5) Make overlay visually full-bright
+            d3.select(clone).classed("active-card-overlay", true);
+
+            // 6) IMPORTANT: re-apply prefocus class so overlay labels scale too
+            if (typeof markPrefocusClass === "function") {
+                markPrefocusClass();
+            }
+        })();
+
         setZOrder();         // v40: ensure layer order right after activation change
     }
 
