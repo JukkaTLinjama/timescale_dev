@@ -1,4 +1,4 @@
-// timeline.js — v47.7 stable (2025-11)
+// timeline.js — v48.4 stable (2025-11)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -532,14 +532,33 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             return;
         }
 
-        // Prioriteetti: 1) active-layer, 2) ei-preview-kortti, 3) ensimmäinen
+        // Priority:
+        //  1) active-card overlay clone (bright card in #gActiveOverlay)
+        //  2) legacy g.active-layer (older versions)
+        //  3) non-preview base card
+        //  4) first match as a final fallback
         let chosen = null;
+
+        // 1) Prefer overlay clone above the dim layer (v48.4)
         for (const n of matches) {
-            if (n.closest && n.closest("g.active-layer")) {
+            const card = n.closest && n.closest("g.card");
+            if (card && card.classList && card.classList.contains("active-card-overlay")) {
                 chosen = n;
                 break;
             }
         }
+
+        // 2) Fallback: legacy active-layer (kept for older layouts)
+        if (!chosen) {
+            for (const n of matches) {
+                if (n.closest && n.closest("g.active-layer")) {
+                    chosen = n;
+                    break;
+                }
+            }
+        }
+
+        // 3) Prefer non-preview cards when multiple copies exist
         if (!chosen) {
             chosen = matches.find(n => {
                 const card = n.closest && n.closest("g.card");
@@ -763,28 +782,40 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     .attr("y1", yy).attr("y2", yy)
                     .attr("stroke", "#aaa");
 
-                // v48: round anchor and offset to full device pixels
-                const yFocRaw = (state.__prefocusY_frozen != null) ? state.__prefocusY_frozen : state.__prefocusY;
-                const yFoc = (yFocRaw == null) ? yy : Math.round(yFocRaw);
-                let textOffsetY = (Util && typeof Util.textHaloOffset === 'function')
+                // v48.4: use the visual center hairline as the halo anchor
+                // EN: This keeps the prefocus zoomed label vertically locked to the center
+                //     line on mobile (no "jump ~20% down" when it crosses the hairline).
+                let yFoc = null;
+                if (typeof getFocusAnchorY === "function") {
+                    try {
+                        yFoc = getFocusAnchorY();
+                    } catch (_) {
+                        yFoc = null;
+                    }
+                }
+
+                // Fallback to the frozen prefocus Y if the anchor cannot be computed
+                if (yFoc == null) {
+                    const yFocRaw = (state.__prefocusY_frozen != null)
+                        ? state.__prefocusY_frozen
+                        : state.__prefocusY;
+                    yFoc = (yFocRaw == null) ? yy : Math.round(yFocRaw);
+                }
+
+                let textOffsetY = (Util && typeof Util.textHaloOffset === "function")
                     ? Math.round(Util.textHaloOffset(yy, yFoc))
                     : 0;
 
-                // Force zero halo on the current prefocus TARGET so it never “rides” the halo
-                const key = state.__prefocusKey;
-                // Force zero halo on the current prefocus TARGET so it never “rides” the halo
+                // Keep the current prefocus TARGET pinned to its own data Y (no extra halo),
+                // so only non-focused neighbours "float" around the center line.
                 const prefKey = state.__prefocusKey;
-                // EN: Use the same stable key as elsewhere (keyOf). Old label+time comparison caused mismatches.
                 if (prefKey && typeof keyOf === "function") {
                     if (keyOf(e) === prefKey) {
                         textOffsetY = 0;
                     }
                 }
-                // NEW v48.3: on active theme’s card, never apply vertical halo offset.
-                // This removes the “jump down ~25 %” when the active card crosses the center line.
-                if (state.activeTheme && e.theme === state.activeTheme) {
-                    textOffsetY = 0;
-                }
+                // EN v48.4: Active card uses the same halo offsets as passive cards,
+                // so neighbours dodge around the prefocus label instead of staying fixed.
 
                 gg.select("text.event-label")
                     .attr("x", 12)
