@@ -322,6 +322,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         centerZoomText
             .attr("x", Math.round((geom.xLeft + geom.xRight) / 1.2)) // slightly to the right
             .attr("y", geom.midY - 8);
+
+        console.log("[DBG hairline]",
+            "midY=", geom.midY,
+            "gRoot offset=", cfg.margin.top);
+
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
@@ -347,6 +352,8 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         const cy = geom.midY - top - 0.5 * (bot - top);
 
         return Math.round(cy);
+        console.log("[DBG anchor]", "cy=", cy, "height=", state.height);
+
     }
 
     function computePrefocusData() {
@@ -510,6 +517,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             state.__prefocusKey = null;
             state.__prefocusY = null;
         }
+
+        console.log("[DBG prefocus]",
+            "key=", state.__prefocusKey,
+            "yy=", newY,
+            "cy=", cy,
+            "dist=", bestDist);
     }
 
     function markPrefocusClass() {
@@ -573,6 +586,25 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         });
 
         __prefocusNode = chosen;
+        try {
+            const labelNode = d3.select(chosen).select("text.event-label").node();
+            const lineNode = centerZoomLine.node && centerZoomLine.node();
+            if (labelNode && lineNode && labelNode.getBoundingClientRect && lineNode.getBoundingClientRect) {
+                const lb = labelNode.getBoundingClientRect();
+                const ln = lineNode.getBoundingClientRect();
+                const labelMidY = lb.top + lb.height / 2;
+                const hairlineY = ln.top; // line is almost 1px high → top ≈ center
+                console.log("[DBG screen]",
+                    "key=", key,
+                    "labelMidY=", labelMidY.toFixed(1),
+                    "hairlineY=", hairlineY.toFixed(1),
+                    "delta=", (labelMidY - hairlineY).toFixed(1)
+                );
+            }
+        } catch (e) {
+            console.warn("[DBG screen] failed", e);
+        }
+
     }
 
     // --- Safe wrapper: requestPrefocusUpdate() ---
@@ -805,17 +837,14 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 let textOffsetY = (Util && typeof Util.textHaloOffset === "function")
                     ? Math.round(Util.textHaloOffset(yy, yFoc))
                     : 0;
-
-                // Keep the current prefocus TARGET pinned to its own data Y (no extra halo),
-                // so only non-focused neighbours "float" around the center line.
+                // EN v48.5: Snap the prefocus TARGET exactly onto the visual hairline.
+                // This removes the ~20% jump on mobile and ensures the focused label
+                // is always perfectly centered. Neighbours still use the halo curve.
                 const prefKey = state.__prefocusKey;
-                if (prefKey && typeof keyOf === "function") {
-                    if (keyOf(e) === prefKey) {
-                        textOffsetY = 0;
-                    }
+                if (prefKey && typeof keyOf === "function" && keyOf(e) === prefKey) {
+                    // Shift so that (yy + offset) == yFoc
+                    textOffsetY = Math.round(yFoc - yy);
                 }
-                // EN v48.4: Active card uses the same halo offsets as passive cards,
-                // so neighbours dodge around the prefocus label instead of staying fixed.
 
                 gg.select("text.event-label")
                     .attr("x", 12)
