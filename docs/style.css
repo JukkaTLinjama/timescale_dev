@@ -450,6 +450,13 @@ g.e.is-prefocus text.event-label {
     stroke-width: .9px;
     filter: drop-shadow(0 0 3px rgba(255, 255, 255, .45));
 }
+/* v48.5: Disable prefocus scale on small screens to avoid visual jump.
+   EN: On mobile, keep only the vertical halo offset; no scale animation. */
+@media (max-width: 800px) {
+    g.e.is-prefocus text.event-label {
+        transform: translateY(var(--ty, 0px)) scale(1);
+    }
+}
 
 g.e.is-prefocus line.event-line {
     stroke: var(--accent);
