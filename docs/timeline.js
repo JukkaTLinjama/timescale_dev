@@ -834,17 +834,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     yFoc = (yFocRaw == null) ? yy : Math.round(yFocRaw);
                 }
 
+                // v48.6: Use the same halo offset for focused and non-focused events.
+                // EN: Let the prefocus label move naturally with scrolling instead of
+                //     being hard-locked to the center line on mobile/desktop.
                 let textOffsetY = (Util && typeof Util.textHaloOffset === "function")
                     ? Math.round(Util.textHaloOffset(yy, yFoc))
                     : 0;
-                // EN v48.5: Snap the prefocus TARGET exactly onto the visual hairline.
-                // This removes the ~20% jump on mobile and ensures the focused label
-                // is always perfectly centered. Neighbours still use the halo curve.
-                const prefKey = state.__prefocusKey;
-                if (prefKey && typeof keyOf === "function" && keyOf(e) === prefKey) {
-                    // Shift so that (yy + offset) == yFoc
-                    textOffsetY = Math.round(yFoc - yy);
-                }
 
                 gg.select("text.event-label")
                     .attr("x", 12)
@@ -1011,14 +1006,16 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             } catch (e) {
                 if (DBG) console.warn("[v48.4] overlay data copy failed", e);
             }
-
             // 5) Make overlay visually full-bright
             d3.select(clone).classed("active-card-overlay", true);
 
-            // 6) IMPORTANT: re-apply prefocus class so overlay labels scale too
-            if (typeof markPrefocusClass === "function") {
-                markPrefocusClass();
-            }
+            // EN v48.43: Do NOT call markPrefocusClass() here.
+            // Prefocus is re-applied once per frame via requestAnimationFrame
+            // after drawCards() has finished. Calling it a second time during
+            // overlay cloning can confuse the browser’s idea of “before/after”
+            // for the transform-transition and make the active card snap
+            // instead of animating smoothly.
+
         })();
 
         setZOrder();         // v40: ensure layer order right after activation change
