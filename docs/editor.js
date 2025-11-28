@@ -37,9 +37,11 @@
                 t.style.cssText = [
                     'position:fixed; right:14px; bottom:18px; z-index:99999;',
                     'padding:6px 10px; border-radius:8px; background:#222; color:#fff;',
-                    'box-shadow:0 3px 12px rgba(0,0,0,.45); font:500 13px/1.3 system-ui;',
-                    'opacity:0; transition:opacity .15s ease'
+                    'box-shadow:0 3px 12px rgba(0,0,0,45); font:500 13px/1.3 system-ui;',
+                    'opacity:0; transition:opacity .15s ease;',
+                    'pointer-events:none;'
                 ].join('');
+
                 document.body.appendChild(t);
             }
             t.textContent = msg;
@@ -549,16 +551,12 @@
             }
 
             // Locate the preview card once (and revalidate if DOM changed)
+            // EN: Use data-theme="preview" instead of title text for robustness.
             if (!__previewCard || !document.contains(__previewCard)) {
                 const svg = document.getElementById('timeline');
-                if (svg) {
-                    __previewCard = null;
-                    svg.querySelectorAll('g.card').forEach(g => {
-                        const t = g.querySelector('text.card-title');
-                        const name = (t?.textContent || '').trim().toLowerCase();
-                        if (name === 'preview') __previewCard = g;
-                    });
-                }
+                __previewCard = svg
+                    ? svg.querySelector('g.card[data-theme="preview"]')
+                    : null;
             }
 
             // Show/hide the entire preview card group if present
@@ -869,41 +867,78 @@
 
         const origTheme = base.theme || (existing ? existing.previewOriginalTheme : null) || null;
 
-        // Compute label core (strip old "draft: <theme> - " if present)
+        // Compute core label: always strip "draft: <theme> - " even if it comes from overrides.label
         const coreLabel = (function () {
-            if (overrides.label != null && overrides.label !== '') return String(overrides.label);
-            const prev = existing ? existing.label : (base.label || '');
-            if (window.DraftUI && DraftUI.stripDraftLabel) return DraftUI.stripDraftLabel(prev);
-            return String(prev || '').replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+            const raw = (overrides.label != null && overrides.label !== '')
+                ? String(overrides.label)
+                : (existing ? existing.label : (base.label || ''));
+
+            if (window.DraftUI && DraftUI.stripDraftLabel) {
+                return DraftUI.stripDraftLabel(raw);
+            }
+            return String(raw || '').replace(/^draft:\s*[^-]+-\s*/i, '').trim();
         })();
 
         const time_years = _deriveTimeYears(overrides, base, existing);
 
+        // Resolve year/date so that the editor fields keep their values between edits
+        const resolvedYear = (function () {
+            if (typeof overrides.year === 'number' && Number.isFinite(overrides.year)) return overrides.year;
+            if (existing && typeof existing.year === 'number') return existing.year;
+            if (typeof base.year === 'number') return base.year;
+            return undefined;
+        })();
+
+        const resolvedDate = (function () {
+            if (typeof overrides.date === 'string' && overrides.date.trim().length) return overrides.date;
+            if (existing && existing.date) return existing.date;
+            if (base && base.date) return base.date;
+            return undefined;
+        })();
+
         if (existing) {
             // Update in place (same id)
             existing.label = _formatPreviewLabel(origTheme, coreLabel);
-            existing.comments = (overrides.comments != null) ? overrides.comments : (existing.comments ?? base.comments ?? '');
+            existing.comments = (overrides.comments != null)
+                ? overrides.comments
+                : (existing.comments ?? base.comments ?? '');
             existing.time_years = time_years;
-            existing.link = (overrides.link != null) ? overrides.link : (existing.link ?? base.link ?? undefined);
-            existing.source = (overrides.source != null) ? overrides.source : (existing.source ?? base.source ?? '');
-            existing.tags = (Array.isArray(overrides.tags)) ? overrides.tags : (existing.tags ?? base.tags ?? []);
+            existing.year = resolvedYear;
+            existing.date = resolvedDate;
+            existing.link = (overrides.link != null)
+                ? overrides.link
+                : (existing.link ?? base.link ?? undefined);
+            existing.source = (overrides.source != null)
+                ? overrides.source
+                : (existing.source ?? base.source ?? '');
+            existing.tags = (Array.isArray(overrides.tags))
+                ? overrides.tags
+                : (existing.tags ?? base.tags ?? []);
             existing.updated_at = overrides.updated_at || new Date().toISOString();
-            existing.edited_by = (overrides.edited_by != null) ? overrides.edited_by : (existing.edited_by ?? undefined);
-            existing.display = (overrides.display != null) ? overrides.display : (existing.display ?? base.display ?? undefined);
-            existing.i18n = (overrides.i18n != null) ? overrides.i18n : (existing.i18n ?? base.i18n ?? undefined);
+            existing.edited_by = (overrides.edited_by != null)
+                ? overrides.edited_by
+                : (existing.edited_by ?? undefined);
+            existing.display = (overrides.display != null)
+                ? overrides.display
+                : (existing.display ?? base.display ?? undefined);
+            existing.i18n = (overrides.i18n != null)
+                ? overrides.i18n
+                : (existing.i18n ?? base.i18n ?? undefined);
 
             PreviewData.set(list);
             return { ok: true, created: false, draft: existing };
         }
 
         // No draft yet → create a single preview draft (like duplicate(1)), bind to this base
-        // Build a unique id baseId(1)/…; reuse logic from duplicate path
         const baseId = String(base.id || 'orig');
         const rx = new RegExp('^' + baseId.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\((\\d+)\\)$');
         let maxN = 0;
         list.forEach(e => {
             const m = e && typeof e.id === 'string' ? e.id.match(rx) : null;
-            if (m) { const n = +m[1]; if (Number.isFinite(n) && n > maxN) maxN = n; }
+            if (m) {
+                const n = +m[1];
+                if (Number.isFinite(n) && n > maxN) maxN = n;
+            }
         });
         const idTaken = id => list.some(e => e && e.id === id);
         let newId = `${baseId}(${Math.max(1, maxN + 1)})`;
@@ -920,6 +955,8 @@
             label: previewLabel,
             comments: overrides.comments ?? (base.comments || ''),
             time_years,
+            year: resolvedYear,
+            date: resolvedDate,
             previewSource: { id: base.id, theme: origTheme },
             previewOriginalTheme: origTheme,
             created_by: overrides.created_by || undefined,

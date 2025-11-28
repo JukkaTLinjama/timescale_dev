@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v48.5  </title>
+        <title>History Timeline v48.6  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v48.5 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v48.6 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -957,18 +957,29 @@
     window.rerenderTimeline = function rerenderTimeline() {
         try {
             if (!window.__BASE_PACK) return; // base not ready yet
+
             const pack = (window.PreviewData && typeof PreviewData.merge === 'function')
                 ? PreviewData.merge(window.__BASE_PACK)    // base + drafts
                 : window.__BASE_PACK;                      // fallback: base only
 
-            window.TS_DATA = pack;                       // publish
+            window.TS_DATA = pack; // publish
+
             if (typeof window.updateTimeline === 'function') {
-                window.updateTimeline();                   // soft re-draw (keeps zoom/scroll)
+                window.updateTimeline(); // soft re-draw (keeps zoom/scroll)
+
+                // EN: Notify any listeners (editor tray, prefocus, etc.)
+                //     that the timeline has been re-rendered by rerenderTimeline.
+                document.dispatchEvent(
+                    new CustomEvent('timeline:render', {
+                        detail: { reason: 'rerenderTimeline' }
+                    })
+                );
             }
         } catch (err) {
             console.warn('[rerenderTimeline] failed:', err);
         }
     };
+
 </script>
 
 <script>
