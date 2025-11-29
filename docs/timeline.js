@@ -849,11 +849,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
             });
 
-            // v47.7: mobile-friendly double-tap and long-press (pointer-based)
+            // v47.7/v48.7: mobile-friendly double-tap + long-press (pointer-based)
             (function attachOpenHandlers() {
-                const TAP_MS = 450;     // double-tap max interval
-                const PRESS_MS = 500;   // long-press threshold
-                const MOVE_TOL = 10;    // px
+                const TAP_MS = 450;     // max interval between taps (double-tap)
+                const PRESS_MS = 450;   // long-press threshold
+                const MOVE_TOL = 24;    // px – enemmän liikkumavaraa sormelle
 
                 let lastTapTime = 0;
                 let pressTimer = null;
@@ -878,6 +878,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         // EN: prevent native long-press selection / callout stealing our timer
                         d3evt.preventDefault();
                         d3evt.stopPropagation();
+
                         // primary pointer only
                         if (d3evt.button != null && d3evt.button !== 0) return;
 
@@ -885,7 +886,9 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         const isDoubleTap = (now - lastTapTime) <= TAP_MS;
                         lastTapTime = now;
 
-                        startX = d3evt.clientX; startY = d3evt.clientY; moved = false;
+                        startX = d3evt.clientX;
+                        startY = d3evt.clientY;
+                        moved = false;
 
                         // long-press timer
                         if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
@@ -905,7 +908,8 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         // track movement/cancel across the page (finger may leave element bounds)
                         const onMove = (e) => {
                             if (moved) return;
-                            const dx = (e.clientX - startX), dy = (e.clientY - startY);
+                            const dx = (e.clientX - startX);
+                            const dy = (e.clientY - startY);
                             if (Math.hypot(dx, dy) > MOVE_TOL) moved = true;
                         };
                         const onEnd = () => {
@@ -927,13 +931,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         evt.stopPropagation();
                     })
                     .on("dblclick", function (evt, evData) {
+                        // desktop double-click
                         evt.preventDefault();
                         evt.stopPropagation();
                         openInfoFor(this, evData);
                     });
-                    
             })();
-
         });
 
         // v40.3: change active only on click (single source of truth = state.activeTheme)
@@ -978,9 +981,26 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             const active = state.activeTheme;
             const gOverlay = d3.select("#gActiveOverlay");
 
-            // 1) Clear previous overlay
+            // no active theme → clear overlay and exit
+            if (!active) {
+                gOverlay.selectAll("*").remove();
+                return;
+            }
+
+            // Detect passive 1 s "present" repaint (no recent user motion)
+            const now = Date.now();
+            const freshMotion = (now - (window.__LAST_MOTION_TS__ || 0)) <= 800; // ms
+            const isPresentTick = (now - (window.__PRESENT_TICK__ || 0)) <= 250;
+            const passivePresent = isPresentTick && !freshMotion;
+
+            if (passivePresent) {
+                // Keep existing overlay as-is so we don't retrigger the
+                // prefocus animation every second.
+                return;
+            }
+
+            // 1) Clear previous overlay only when we actually rebuild it
             gOverlay.selectAll("*").remove();
-            if (!active) return;
 
             // 2) Find the original active card only from the real cards layer
             const src = gCards.selectAll("g.card")
@@ -1006,16 +1026,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             } catch (e) {
                 if (DBG) console.warn("[v48.4] overlay data copy failed", e);
             }
+
             // 5) Make overlay visually full-bright
             d3.select(clone).classed("active-card-overlay", true);
 
             // EN v48.43: Do NOT call markPrefocusClass() here.
-            // Prefocus is re-applied once per frame via requestAnimationFrame
-            // after drawCards() has finished. Calling it a second time during
-            // overlay cloning can confuse the browser’s idea of “before/after”
-            // for the transform-transition and make the active card snap
-            // instead of animating smoothly.
-
         })();
 
         setZOrder();         // v40: ensure layer order right after activation change
@@ -1307,6 +1322,9 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             if (!(window.TS_DATA && Array.isArray(window.TS_DATA.events))) return;
             // v45.5: refresh only uses preloaded TS_DATA; removed all I/O or domain recomputation.
             // This function now re-renders using the existing transform.
+
+            // mark this repaint as a 1 s "present" tick
+            window.__PRESENT_TICK__ = Date.now();
 
             // 0) cache current zoom transform
             const t = d3.zoomTransform(svg.node());
