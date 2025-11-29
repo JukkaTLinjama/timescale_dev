@@ -80,19 +80,48 @@
     function asCSV(v) { return Array.isArray(v) ? v.join(', ') : (v ?? ''); }
     function str(v) { return (v == null ? '' : String(v)); }
     function extractLink(ev) {
-      if (ev?.link && typeof ev.link === 'object') {
-        return { text: ev.link.text ?? ev.link.label ?? ev.link.title ?? '', url: ev.link.url ?? ev.link.href ?? '' };
-      }
-      return { text: ev?.link_text ?? ev?.linkLabel ?? ev?.linkTitle ?? '', url: ev?.url ?? ev?.href ?? '' };
+        if (ev?.link && typeof ev.link === 'object') {
+            return {
+                text: ev.link.text ?? ev.link.label ?? ev.link.title ?? '',
+                url: ev.link.url ?? ev.link.href ?? ''
+            };
+        }
+
+        const text = ev?.link_text ?? ev?.linkLabel ?? ev?.linkTitle ?? '';
+        const url = ev?.url ?? ev?.href ?? ev?.ref ?? '';
+        return { text, url };
     }
 
     function openEditor(ev) {
       editor.hidden = false;
         window.__editorOpen = true;
         document.body.classList.add('editor-open');
-      f.title.value = ev?.display_label ?? ev?.label ?? '';
-      f.year.value = Number.isFinite(ev?.year) ? String(ev.year) : (ev?.date ?? '');
-      f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.body ?? '';
+        f.title.value = ev?.display_label ?? ev?.label ?? '';
+
+        // Keep year/date in sync: date is primary when AD, BCE uses year only.
+        const rawDate = (ev?.date ?? ev?.iso_date ?? '');
+        const dateStr = str(rawDate);
+
+        // Try to extract YYYY from date
+        let yearFromDate = '';
+        const ym = dateStr.match(/^(\d{4})/);
+        if (ym) yearFromDate = ym[1];
+
+        // Determine year: explicit ev.year > derived from date > empty
+        let yearVal = Number.isFinite(ev?.year)
+            ? ev.year
+            : (yearFromDate ? Number(yearFromDate) : undefined);
+
+        // BCE → do not keep ISO date (invalid)
+        if (typeof yearVal === 'number' && yearVal < 0) {
+            f.date.value = '';
+            f.year.value = String(yearVal);
+        } else {
+            f.date.value = dateStr;
+            f.year.value = (yearVal != null) ? String(yearVal) : '';
+        }
+
+        f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.info ?? ev?.body ?? '';
         f.theme.value = ev?.theme ?? '';
 
         // EN: Show source ID for clarity (read-only field in HTML).
@@ -122,7 +151,6 @@
             badge.textContent = isPreview && orig ? `Theme: draft: ${orig}` : `Theme: ${ev?.theme || '—'}`;
         })();
 
-      f.date.value = str(ev?.date ?? ev?.iso_date ?? '');
       const link = extractLink(ev);
       f.linkText.value = str(link.text);
       f.linkUrl.value = str(link.url);
@@ -160,10 +188,60 @@
       function getData() {
           const label = (f.title?.value || '').trim();
           const comments = (f.desc?.value || '').trim();
+
+          let date = (f.date?.value || '').trim();
           const yearStr = (f.year?.value || '').trim();
-          const yearNum = /^\d+$/.test(yearStr) ? Number(yearStr) : undefined;
-          const date = (f.date?.value || '').trim();
-          const link = { text: (f.linkText?.value || '').trim(), url: (f.linkUrl?.value || '').trim() };
+
+          // Date is primary; if filled, derive year from its first 4 digits.
+          let yearNum;
+          if (date) {
+              const m = date.match(/^(\d{4})/);
+              if (m) {
+                  yearNum = Number(m[1]);
+              } else if (/^\d{4}$/.test(yearStr)) {
+                  yearNum = Number(yearStr);
+              } else {
+                  // ei kelvollinen YYYY-alkuinen date -> tiputetaan date pois
+                  date = '';
+              }
+          } else if (/^\d+$/.test(yearStr)) {
+              yearNum = Number(yearStr);
+          }
+
+          // BCE: jos year negatiivinen, date ei saa jäädä (ei ole kelvollista ISO-aikaa)
+          if (typeof yearNum === 'number' && yearNum < 0) {
+              date = '';
+          }
+
+          // --- Estä tulevaisuuden date/year + näytä toast ---
+          const now = new Date();
+          const currentYear = now.getFullYear();
+
+          if (date) {
+              const d = new Date(date);
+              if (!isNaN(d) && d > now) {
+                  date = '';
+                  if (window.showToast) {
+                      window.showToast('Future date ignored (cannot be in the future)', 2200);
+                  } else {
+                      console.warn('[editor] Future date ignored');
+                  }
+              }
+          }
+
+          if (typeof yearNum === 'number' && yearNum > currentYear) {
+              yearNum = undefined;
+              if (window.showToast) {
+                  window.showToast('Future year ignored (must be ≤ current year)', 2200);
+              } else {
+                  console.warn('[editor] Future year ignored');
+              }
+          }
+
+          const link = {
+              text: (f.linkText?.value || '').trim(),
+              url: (f.linkUrl?.value || '').trim()
+          };
           const source = (f.source?.value || '').trim();
           const tags = (f.tags?.value || '').split(',').map(s => s.trim()).filter(Boolean);
           const edited_by = (f.editedBy?.value || '').trim();
@@ -329,7 +407,25 @@
 
       }
 
-    ensureActions();
+        ensureActions();
+
+        // EN: Press Enter on any INPUT inside the editor to trigger "Save draft".
+        editor.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            const target = e.target;
+            if (!target) return;
+            const tag = target.tagName;
+            // Do NOT hijack Enter in textarea (multiline descriptions).
+            if (tag !== 'INPUT') return;
+            if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+
+            e.preventDefault();
+            const saveBtn = editor.querySelector('.editor-actions button');
+            if (saveBtn) {
+                saveBtn.click();
+            }
+        });
+
       // --- (FINAL) Compact mobile layout: main fields visible; meta truly hidden until expanded ---
       function setupAdvancedFields() {
           // EN: Only hide *less frequently used* metadata fields.
@@ -762,12 +858,49 @@
 
         // Final label shown in the preview card
         const previewLabel = DraftUI.formatDraftLabel(origTheme, userLabel);
+
+        // Derive basic metadata so the duplicate behaves like the original on first edit
+        const dupYear = (typeof overrides.year === 'number' && Number.isFinite(overrides.year))
+            ? overrides.year
+            : (typeof base.year === 'number' ? base.year : undefined);
+
+        const dupDate = (typeof overrides.date === 'string' && overrides.date.trim().length)
+            ? overrides.date
+            : (base.date || base.iso_date || undefined);
+
+        const dupLink = (function () {
+            if (overrides.link != null) return overrides.link;
+            if (base.link && typeof base.link === 'object') return base.link;
+            const url = base.url || base.href || base.ref || '';
+            const text = base.link_text || base.linkLabel || base.linkTitle || '';
+            if (url) return { text, url };
+            return undefined;
+        })();
+
+        const dupSource = (function () {
+            if (overrides.source != null) return overrides.source;
+            return base.source ?? base.ref ?? base.reference ?? '';
+        })();
+
+        const dupTags = (function () {
+            if (Array.isArray(overrides.tags)) return overrides.tags;
+            if (Array.isArray(base.tags)) return base.tags;
+            if (Array.isArray(base.keywords)) return base.keywords;
+            return [];
+        })();
+
         const dup = {
             id: newId,
             theme: 'preview',                    // stays in preview for visualization
             label: previewLabel,                 // "draft: <theme> - <label>"
-            comments: overrides.comments ?? (base.comments || ''),
+            comments: overrides.comments ?? (base.comments || base.info || ''),
             time_years: tY,
+            year: dupYear,
+            date: dupDate,
+            link: dupLink,
+            source: dupSource,
+            tags: dupTags,
+            ref: base.ref ?? base.reference ?? undefined,
             previewStatus: 'added',
             previewSource: { id: base.id, theme: origTheme },
             previewOriginalTheme: origTheme,     // used when exporting/committing
@@ -793,6 +926,11 @@
     window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
         duplicateFromEventId
     });
+
+    // Extend existing API without clobbering prior helpers
+    window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
+        duplicateFromEventId
+    });
 })();
 
 
@@ -808,32 +946,54 @@
     function _presentYear() { return _now().getFullYear(); }
 
     function _deriveTimeYears(overrides, base, existingDraft) {
-        // Priority: explicit time_years > year > date > existing > base inference
+        // Priority: explicit time_years > date > year > existing > base inference
         if (typeof overrides.time_years === 'number') return overrides.time_years;
 
-        if (typeof overrides.year === 'number' && Number.isFinite(overrides.year)) {
-            return Math.max(0, _presentYear() - overrides.year);
-        }
+        // 1) If editor provided a full date string, use that (most precise)
         if (overrides.date) {
             const d = (overrides.date instanceof Date) ? overrides.date : new Date(overrides.date);
             if (!isNaN(d)) {
+                const now = Date.now();
+                // Future date? clamp to 0 years ago
+                if (d.getTime() > now) return 0;
+
                 const DAY_MS = 86400000, YEAR_DAYS = 365.2425;
-                return Math.max(0, ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS);
+                return ((now - d.getTime()) / DAY_MS) / YEAR_DAYS;
             }
         }
+
+        // 2) Fallback: numeric year (allow BCE)
+        if (typeof overrides.year === 'number' && Number.isFinite(overrides.year)) {
+            // distance in years is presentYear - year (year may be negative)
+            const nowYear = _presentYear();
+            if (overrides.year > nowYear) return 0;
+            return nowYear - overrides.year;
+        }
+
+        // 3) Existing draft value, if we are updating
         if (existingDraft && typeof existingDraft.time_years === 'number') return existingDraft.time_years;
+
+        // 4) Base event inference
         if (base) {
             if (typeof base.time_years === 'number') return base.time_years;
-            if (typeof base.year === 'number') return Math.max(0, _presentYear() - base.year);
+
             if (base.date) {
                 const d = (base.date instanceof Date) ? base.date : new Date(base.date);
                 if (!isNaN(d)) {
                     const DAY_MS = 86400000, YEAR_DAYS = 365.2425;
-                    return Math.max(0, ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS);
+                    return ((Date.now() - d.getTime()) / DAY_MS) / YEAR_DAYS;
                 }
             }
+
+            if (typeof base.year === 'number') {
+                const nowY = _presentYear();
+                if (base.year > nowY) return 0;
+                return nowY - base.year;
+            }
         }
-        return 0; // near "now"
+
+        // 5) Default: treat as "very near present"
+        return 0;
     }
 
     function _formatPreviewLabel(origTheme, coreLabel) {
@@ -867,12 +1027,11 @@
 
         const origTheme = base.theme || (existing ? existing.previewOriginalTheme : null) || null;
 
-        // Compute core label: always strip "draft: <theme> - " even if it comes from overrides.label
+        // Core label (strip old "draft: <theme> - " if present)
         const coreLabel = (function () {
             const raw = (overrides.label != null && overrides.label !== '')
                 ? String(overrides.label)
                 : (existing ? existing.label : (base.label || ''));
-
             if (window.DraftUI && DraftUI.stripDraftLabel) {
                 return DraftUI.stripDraftLabel(raw);
             }
@@ -881,7 +1040,7 @@
 
         const time_years = _deriveTimeYears(overrides, base, existing);
 
-        // Resolve year/date so that the editor fields keep their values between edits
+        // Resolve year/date so that they persist between edits
         const resolvedYear = (function () {
             if (typeof overrides.year === 'number' && Number.isFinite(overrides.year)) return overrides.year;
             if (existing && typeof existing.year === 'number') return existing.year;
@@ -892,9 +1051,46 @@
         const resolvedDate = (function () {
             if (typeof overrides.date === 'string' && overrides.date.trim().length) return overrides.date;
             if (existing && existing.date) return existing.date;
-            if (base && base.date) return base.date;
+            if (base && (base.date || base.iso_date)) return base.date || base.iso_date;
             return undefined;
         })();
+
+        // Resolve link/source/tags with sensible fallbacks
+        const linkVal = (function () {
+            if (overrides.link != null) return overrides.link;
+            if (existing && existing.link) return existing.link;
+            if (base.link && typeof base.link === 'object') return base.link;
+            const txt = base.link_text || base.linkLabel || base.linkTitle || '';
+            const url = base.url || base.href || base.ref || base.reference || '';
+            if (txt || url) return { text: txt, url };
+            return undefined;
+        })();
+
+        const sourceVal = (function () {
+            if (overrides.source != null) return overrides.source;
+            if (existing && typeof existing.source === 'string') return existing.source;
+            return base.source ?? base.ref ?? base.reference ?? '';
+        })();
+
+        const tagsVal = (function () {
+            if (Array.isArray(overrides.tags)) return overrides.tags;
+            if (existing && Array.isArray(existing.tags)) return existing.tags;
+            if (Array.isArray(base.tags)) return base.tags;
+            if (Array.isArray(base.keywords)) return base.keywords;
+            return [];
+        })();
+
+        // Prevent future date/year slipping in
+        const nowYear = (new Date()).getFullYear();
+        if (resolvedDate) {
+            const d = new Date(resolvedDate);
+            if (!isNaN(d) && d > new Date()) {
+                resolvedDate = '';
+            }
+        }
+        if (typeof resolvedYear === 'number' && resolvedYear > nowYear) {
+            resolvedYear = undefined;
+        }
 
         if (existing) {
             // Update in place (same id)
@@ -905,15 +1101,9 @@
             existing.time_years = time_years;
             existing.year = resolvedYear;
             existing.date = resolvedDate;
-            existing.link = (overrides.link != null)
-                ? overrides.link
-                : (existing.link ?? base.link ?? undefined);
-            existing.source = (overrides.source != null)
-                ? overrides.source
-                : (existing.source ?? base.source ?? '');
-            existing.tags = (Array.isArray(overrides.tags))
-                ? overrides.tags
-                : (existing.tags ?? base.tags ?? []);
+            existing.link = linkVal;
+            existing.source = sourceVal;
+            existing.tags = tagsVal;
             existing.updated_at = overrides.updated_at || new Date().toISOString();
             existing.edited_by = (overrides.edited_by != null)
                 ? overrides.edited_by
@@ -929,16 +1119,13 @@
             return { ok: true, created: false, draft: existing };
         }
 
-        // No draft yet → create a single preview draft (like duplicate(1)), bind to this base
+        // No draft yet → create a single preview draft tied to this base
         const baseId = String(base.id || 'orig');
         const rx = new RegExp('^' + baseId.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\((\\d+)\\)$');
         let maxN = 0;
         list.forEach(e => {
             const m = e && typeof e.id === 'string' ? e.id.match(rx) : null;
-            if (m) {
-                const n = +m[1];
-                if (Number.isFinite(n) && n > maxN) maxN = n;
-            }
+            if (m) { const n = +m[1]; if (Number.isFinite(n) && n > maxN) maxN = n; }
         });
         const idTaken = id => list.some(e => e && e.id === id);
         let newId = `${baseId}(${Math.max(1, maxN + 1)})`;
@@ -957,6 +1144,9 @@
             time_years,
             year: resolvedYear,
             date: resolvedDate,
+            link: linkVal,
+            source: sourceVal,
+            tags: tagsVal,
             previewSource: { id: base.id, theme: origTheme },
             previewOriginalTheme: origTheme,
             created_by: overrides.created_by || undefined,
@@ -1001,26 +1191,46 @@
     return infoEl;
   }
 
-  function buildEventHTML(ev) {
-    const label = ev?.display_label || ev?.label || 'Event';
-    const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
-    const meta = [when, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
-    const comments = (typeof ev?.display_comments === 'string' && ev.display_comments.trim().length > 0)
-      ? ev.display_comments.trim()
-      : ((typeof ev?.comments === 'string') ? ev.comments.trim() : '');
-    const ref = (ev?.ref || '').trim();
-    const link = ref && /^https?:\/\//i.test(ref)
-      ? `<div class="hint">Ref: <a href="${ref}" target="_blank" rel="noopener">link</a></div>`
-      : (ref ? `<div class="hint">Ref: ${ref}</div>` : ``);
-    const body = comments ? `<div class="body">${comments}</div>` : `<div class="body" style="opacity:.8;">(No notes)</div>`;
-    return `
+    function buildEventHTML(ev) {
+        const label = ev?.display_label || ev?.label || 'Event';
+        const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
+        const meta = [when, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
+
+        const comments = (typeof ev?.display_comments === 'string' && ev.display_comments.trim().length > 0)
+            ? ev.display_comments.trim()
+            : (typeof ev?.comments === 'string' && ev.comments.trim().length > 0)
+                ? ev.comments.trim()
+                : (typeof ev?.info === 'string' ? ev.info.trim() : '');
+
+        // EN: Prefer explicit link object from drafts, fall back to ref/url fields.
+        const linkObj = (ev && typeof ev.link === 'object') ? ev.link : null;
+        const rawRef = (ev?.ref || '').trim();
+        const url = (linkObj?.url || rawRef || ev?.url || ev?.href || '').trim();
+        const textFromLink = (linkObj?.text || linkObj?.label || linkObj?.title || '').trim();
+
+        let linkHtml = '';
+        if (url && /^https?:\/\//i.test(url)) {
+            // EN: Use link text from editor if available; otherwise fall back to ref or generic "link".
+            const anchorText = textFromLink || rawRef || 'link';
+            linkHtml = `<div class="hint">Ref: <a href="${url}" target="_blank" rel="noopener">${anchorText}</a></div>`;
+        } else if (rawRef) {
+            linkHtml = `<div class="hint">Ref: ${rawRef}</div>`;
+        } else if (textFromLink) {
+            linkHtml = `<div class="hint">Ref: ${textFromLink}</div>`;
+        }
+
+        const body = comments
+            ? `<div class="body">${comments}</div>`
+            : `<div class="body" style="opacity:.8;">(No notes)</div>`;
+
+        return `
       <div class="title">${label}</div>
       <div class="meta">${meta}</div>
-      ${body}${link}
+      ${body}${linkHtml}
       <div class="actions">
         <button class="edit-event" type="button" aria-label="Edit event">Edit event</button>
       </div>`;
-  }
+    }
 
   function show(ev, screenBox) {
     __lastUserIntentTs = 0;
