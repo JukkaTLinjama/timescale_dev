@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<title>Lens Test – vertical log axis</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #05070b;
+    color: #eee;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .page {
+    display: flex;
+    height: 100vh;
+  }
+
+  .controls {
+    width: 260px;
+    padding: 12px 14px;
+    box-sizing: border-box;
+    border-right: 1px solid #222;
+    background: radial-gradient(circle at top left, #202638 0, #05070b 55%);
+    font-size: 13px;
+  }
+
+  .controls h1 {
+    font-size: 16px;
+    margin: 0 0 8px;
+  }
+
+  .controls p {
+    margin: 4px 0 8px;
+    line-height: 1.3;
+  }
+
+  .ctrl-block {
+    margin-bottom: 12px;
+  }
+
+  .ctrl-block label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .ctrl-block input[type="range"] {
+    width: 100%;
+  }
+
+.main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  background: radial-gradient(circle at 50% -40%, #101524 0%, #03040a 70%);
+  /* ↑ leveämpi ja ylemmäs ankkuroitu gradientti */
+}
+
+svg {
+  background: transparent;   /* tärkeää */
+  border-left: 1px solid #111;
+  touch-action: none;
+}
+
+  .axis-line {
+    stroke: #888;
+    stroke-width: 1;
+  }
+
+  .axis-tick {
+    stroke: #555;
+    stroke-width: 1;
+  }
+
+  .axis-label {
+    fill: #bbb;
+    font-size: 10px;
+    alignment-baseline: middle;
+  }
+
+  .grid-line {
+    stroke: #222;
+    stroke-width: 1;
+  }
+
+  .lens-band {
+    fill: rgba(255, 255, 255, 0.04);
+    stroke: rgba(255, 255, 255, 0.18);
+    stroke-width: 1;
+    pointer-events: none;
+  }
+
+  .event-dot {
+    fill: #7ac7ff;
+  }
+
+.event-label {
+  fill: #e0e6ff;
+  font-size: 11px;
+  alignment-baseline: middle;
+  transform-box: view-box;
+  transform-origin: 40% 50%;    /* hieman tekstin sisään, ettei kasvu mene pelkästään oikealle */
+  transition: transform .26s cubic-bezier(.22,.7,.13,1);
+  will-change: transform;
+  transform: scaleX(var(--lens-scale, 1));  /* vain vaakasuuntainen suurennus */
+}
+
+  .event-label.is-prefocus {
+    fill: #fff;
+    font-weight: 600;
+  }
+
+  .event-dot.is-prefocus {
+    fill: #fff6a0;
+    r: 5;
+  }
+
+.label-bg {
+  fill: rgba(5, 7, 11, 0.9);              /* tumma tausta */
+  stroke: rgba(255, 255, 255, 0.35);      /* kevyt ääriviiva */
+  stroke-width: 0.5;
+  rx: 4;
+  ry: 4;
+}
+
+  .help-note {
+    font-size: 11px;
+    color: #aaa;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="controls">
+    <h1>Lens test</h1>
+    <p>
+      Yksinkertainen log-akseli + linssi.  
+      Zoomaa hiiren rullalla, panoroimalla vedä.  
+      Linssi suurentaa keskivyöhykettä.
+    </p>
+
+    <div class="ctrl-block">
+      <label>
+        <span>Lens radius R (px)</span>
+        <span id="lblR">220</span>
+      </label>
+      <input id="sliderR" type="range" min="30" max="320" step="5" value="120">
+    </div>
+
+    <div class="ctrl-block">
+      <label>
+        <span>Lens strength k</span>
+        <span id="lblK">0.80</span>
+      </label>
+      <input id="sliderK" type="range" min="0" max="1" step="0.05" value="0.8">
+    </div>
+
+    <div class="ctrl-block">
+      <label>
+        <span>Max label scale</span>
+        <span id="lblZ">1.35</span>
+      </label>
+      <input id="sliderZ" type="range" min="1" max="1.8" step="0.05" value="1.35">
+    </div>
+
+    <div class="ctrl-block">
+      <label>
+        <span>Lens center follows pointer</span>
+        <input id="chkFollow" type="checkbox">
+      </label>
+    </div>
+
+    <p class="help-note">
+      Tässä demossa ei ole kortteja, vain log-akseli + event-pisteet.  
+      Kun logiikka ja parametrit tuntuvat hyviltä, sama voidaan siirtää timelineen.
+    </p>
+  </div>
+
+  <div class="main">
+    <svg id="lensSvg" width="480" height="720"></svg>
+  </div>
+</div>
+
+<script>
+(function() {
+  const svg = d3.select("#lensSvg");
+  const width  = +svg.attr("width");
+  const height = +svg.attr("height");
+
+  // Layout constants
+  const margin = { top: 30, right: 80, bottom: 30, left: 80 };
+  const innerH = height - margin.top - margin.bottom;
+  const axisX  = margin.left;
+  const eventsX = margin.left + 60;
+
+  // Log domain years
+  const domainYears = [1e0, 1e9];
+
+  let yBase = d3.scaleLog()
+    .domain(domainYears)
+    .range([margin.top, height - margin.bottom]);
+
+  let y = yBase.copy();  // rescaled by zoom
+
+  // Lens parameters (mutable, controlled by sliders)
+  const lensCfg = {
+    cy: height / 2,
+    R: 220,
+    k: 0.8,
+    zMax: 1.35,
+    followPointer: false
+  };
+
+  // Groups
+  const gRoot  = svg.append("g");
+  const gGrid  = gRoot.append("g").attr("class", "grid");
+  const gAxis  = gRoot.append("g").attr("class", "axis");
+  const gLens  = gRoot.append("g").attr("class", "lens");
+  const gEvents = gRoot.append("g").attr("class", "events");
+
+  const lensRect = gLens.append("rect").attr("class", "lens-band");
+
+  // Dummy events: log-spread between 1 year and 1e9 years
+  const events = generateEvents();
+
+    function generateEvents() {
+        const out = [];
+        const labels = [
+            "Event A", "Event B", "Event C", "Event D", "Event E", "Event F",
+            "Event G", "Event H", "Event I", "Event J", "Event K", "Event L"
+        ];
+        const n = labels.length;
+
+        // satunnaiset log-jakautuneet eventit
+        for (let i = 0; i < n; i++) {
+            const dec = d3.randomUniform(0, 9)();  // decades 0..9
+            const mant = d3.randomUniform(1, 10)();
+            const tYears = mant * Math.pow(10, dec);
+            out.push({
+                id: i,
+                label: labels[i],
+                time_years: tYears
+            });
+        }
+
+        // kaksi lisäeventtiä täsmälleen samalla aikaleimalla
+        const sameYear = 1e7; // 10^7 vuotta
+        out.push({
+            id: out.length,
+            label: "Event M (same)",
+            time_years: sameYear
+        });
+        out.push({
+            id: out.length,
+            label: "Event N (same)",
+            time_years: sameYear
+        });
+
+        // järjestetään aikajärjestykseen
+        return out.sort((a, b) => a.time_years - b.time_years);
+    }
+
+  // Lens helpers -----------------------------------------------------
+
+    // 0–1 smoothstep
+    function smoothStep01(x) {
+        x = Math.max(0, Math.min(1, x));   // clamp
+        return x * x * (3 - 2 * x);        // smoothstep
+    }
+
+    // S-muotoinen linssi, vaikutus vain |d| < R
+    function lensY(y0) {
+        const cy = lensCfg.cy;
+        const R = lensCfg.R;
+        const k = lensCfg.k;
+
+        if (R <= 0 || k === 0) return y0;
+
+        const d = y0 - cy;           // etäisyys keskiviivasta
+        const n = Math.abs(d) / R;   // 0 = keskellä, 1 = reuna
+
+        if (n >= 1) return y0;       // linssialueen ulkopuolella ei vaikutusta
+
+        // 1 keskellä, 0 reunassa (pehmeä reuna, muuten lineaarinen)
+        const t = smoothStep01(n);   // 0 → keskellä, 1 → reunassa
+        const m = 1 - t;             // 1 keskellä, 0 reunassa
+
+        // kerroin > 1 venyttää välimatkaa keskiviivasta
+        const factor = 1 + k * m;    // k säätää paljonko suurennetaan
+
+        return cy + d * factor;      // keskikohta jää paikalleen, sisäosa venyy
+    }
+
+    // Sama maski skaalalle: vain linssialueella >1
+    function lensScale(yScreen) {
+        const cy = lensCfg.cy;
+        const R = lensCfg.R;
+        const zMax = Math.max(1, lensCfg.zMax);
+
+        if (R <= 0 || zMax <= 1) return 1;
+
+        const n = Math.abs(yScreen - cy) / R;
+        if (n >= 1) return 1;              // ulkopuolella ei suurennusta
+
+        const m = 1 - smoothStep01(n);     // 1 keskellä, 0 reunassa
+        return 1 + (zMax - 1) * m;
+    }
+
+  function updateLensRect() {
+    const cy = lensCfg.cy;
+    const R  = lensCfg.R;
+    lensRect
+      .attr("x", margin.left - 20)
+      .attr("width", width - margin.left - margin.right + 40)
+      .attr("y", cy - R)
+      .attr("height", 2 * R);
+  }
+
+  // Axis & grid ------------------------------------------------------
+
+  function drawAxisAndGrid() {
+    gAxis.selectAll("*").remove();
+    gGrid.selectAll("*").remove();
+
+    // axis line
+    gAxis.append("line")
+      .attr("class", "axis-line")
+      .attr("x1", axisX)
+      .attr("x2", axisX)
+      .attr("y1", margin.top)
+      .attr("y2", height - margin.bottom);
+
+    // choose integer exponents in domain
+    const d0 = y.domain()[0];
+    const d1 = y.domain()[1];
+    const e0 = Math.ceil(Math.log10(d0));
+    const e1 = Math.floor(Math.log10(d1));
+    const exponents = d3.range(e0, e1 + 1);
+
+    exponents.forEach(exp => {
+      const val = Math.pow(10, exp);
+      const y0  = y(val);
+      const yL  = lensY(y0); // lens-applied
+
+      // minor grid line
+      gGrid.append("line")
+        .attr("class", "grid-line")
+        .attr("x1", axisX + 2)
+        .attr("x2", width - margin.right)
+        .attr("y1", yL)
+        .attr("y2", yL);
+
+      // tick
+      gAxis.append("line")
+        .attr("class", "axis-tick")
+        .attr("x1", axisX - 4)
+        .attr("x2", axisX + 4)
+        .attr("y1", yL)
+        .attr("y2", yL);
+
+      // label "10^n"
+      const t = gAxis.append("text")
+        .attr("class", "axis-label")
+        .attr("x", axisX - 8)
+        .attr("y", yL)
+        .attr("text-anchor", "end");
+
+      t.append("tspan").text("10");
+      t.append("tspan")
+        .attr("baseline-shift", "super")
+        .attr("font-size", "9px")
+        .text(exp);
+    });
+  }
+
+  // Events & prefocus ------------------------------------------------
+
+    function drawEvents() {
+        gEvents.selectAll("*").remove();
+
+        // compute lens-mapped y for each event
+        const withY = events.map(ev => {
+            const y0 = y(ev.time_years);
+            const yL = lensY(y0);
+            return {
+                ...ev,
+                y0,
+                yL
+            };
+        });
+
+        // pick prefocus = nearest to lens center in lens-mapped Y
+        const EPS = 0.5;  // px: kuinka lähellä toisiaan katsotaan "samaksi"
+
+        let bestDist = Infinity;
+        let candidates = [];
+
+        withY.forEach(ev => {
+            const d = Math.abs(ev.yL - lensCfg.cy);
+
+            if (d < bestDist - EPS) {
+                // selvästi parempi kuin aiemmat
+                bestDist = d;
+                candidates = [ev];
+            } else if (Math.abs(d - bestDist) <= EPS) {
+                // käytännössä sama y → lisätään arvottavaksi
+                candidates.push(ev);
+            }
+        });
+
+        let pref = null;
+
+        if (candidates.length > 0) {
+            const idx = Math.floor(Math.random() * candidates.length);
+            pref = candidates[idx];
+        }
+
+        const prefId = pref ? pref.id : null;
+
+        // piirretään kaikki event-ryhmät
+        const g = gEvents.selectAll("g.ev")
+            .data(withY, d => d.id)
+            .enter()
+            .append("g")
+            .attr("class", "ev");
+
+        // piste
+        g.append("circle")
+            .attr("class", d => "event-dot" + (d.id === prefId ? " is-prefocus" : ""))
+            .attr("cx", eventsX)
+            .attr("cy", d => d.yL)
+            .attr("r", d => d.id === prefId ? 5 : 3);
+
+        // label
+        const labels = g.append("text")
+            .attr("class", d => "event-label" + (d.id === prefId ? " is-prefocus" : ""))
+            .attr("x", eventsX + 10)
+            .attr("y", d => d.yL)
+            .text(d => d.label + " (" + formatYears(d.time_years) + ")");
+
+        // asetetaan skaalakerroin: vain aktiivinen suurenee
+        labels.each(function (d) {
+            const s = (d.id === prefId) ? lensScale(d.yL) : 1;
+            this.style.setProperty("--lens-scale", s.toFixed(3));
+        });
+
+        // luodaan taustarektangeli vain aktiivisen labelin taakse
+        labels.each(function (d) {
+            if (d.id !== prefId) return;
+
+            const bbox = this.getBBox();
+            d3.select(this.parentNode)
+                .insert("rect", "text")         // ennen text-elementtiä
+                .attr("class", "label-bg")
+                .attr("x", bbox.x - 6)
+                .attr("y", bbox.y - 3)
+                .attr("width", bbox.width + 12)
+                .attr("height", bbox.height + 6);
+        });
+
+        // varmistetaan että aktiivinen ryhmä on viimeisenä (ylimpänä)
+        gEvents.selectAll("g.ev")
+            .sort((a, b) =>
+                (a.id === prefId ? 1 : 0) - (b.id === prefId ? 1 : 0)
+            );
+    }
+
+  function formatYears(v) {
+    const exp = Math.round(Math.log10(v));
+    if (v < 1e3) return v.toFixed(0) + " y";
+    return "10^" + exp + " y";
+  }
+
+  function drawAll() {
+    updateLensRect();
+    drawAxisAndGrid();
+    drawEvents();
+  }
+
+  // Zoom & pan -------------------------------------------------------
+
+  const zoom = d3.zoom()
+    .scaleExtent([0.3, 10])
+    .on("zoom", (event) => {
+      y = event.transform.rescaleY(yBase);
+      drawAll();
+    });
+
+  svg.call(zoom)
+     .on("dblclick.zoom", null); // disable default dblclick zoom
+
+  // Pointer-driven lens center (optional) ----------------------------
+
+  svg.on("pointermove", (event) => {
+    if (!lensCfg.followPointer) return;
+    const pt = d3.pointer(event);
+    lensCfg.cy = pt[1];
+    drawAll();
+  });
+
+  // Controls ---------------------------------------------------------
+
+  const sliderR = document.getElementById("sliderR");
+  const sliderK = document.getElementById("sliderK");
+  const sliderZ = document.getElementById("sliderZ");
+  const lblR    = document.getElementById("lblR");
+  const lblK    = document.getElementById("lblK");
+  const lblZ    = document.getElementById("lblZ");
+  const chkFollow = document.getElementById("chkFollow");
+
+  sliderR.addEventListener("input", () => {
+    lensCfg.R = parseFloat(sliderR.value);
+    lblR.textContent = sliderR.value;
+    drawAll();
+  });
+
+  sliderK.addEventListener("input", () => {
+    lensCfg.k = parseFloat(sliderK.value);
+    lblK.textContent = (+sliderK.value).toFixed(2);
+    drawAll();
+  });
+
+  sliderZ.addEventListener("input", () => {
+    lensCfg.zMax = parseFloat(sliderZ.value);
+    lblZ.textContent = (+sliderZ.value).toFixed(2);
+    drawAll();
+  });
+
+  chkFollow.addEventListener("change", () => {
+    lensCfg.followPointer = chkFollow.checked;
+    if (!lensCfg.followPointer) {
+      lensCfg.cy = height / 2;
+      drawAll();
+    }
+  });
+
+  // Initial draw
+  drawAll();
+})();
+</script>
+</body>
+</html>

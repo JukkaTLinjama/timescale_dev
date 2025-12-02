@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49  </title>
+        <title>History Timeline v48.81  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v48.81 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -72,57 +72,56 @@
         <svg id="timeline"></svg>
     </div>
 
-    <!-- TEMP v49-lens: inline event editor disabled while testing lens
-        <div id="event-editor" hidden>
-            <div class="editor-header">
-                <div class="editor-title">Edit event</div>
-                <button id="close-editor" title="Close editor">×</button>
-            </div>
-            <div class="editor-body">
-                <label>Title</label>
-                <input id="edit-title" type="text">
-    
-                <label>Year</label>
-                <input id="edit-year" type="text">
-    
-                <label>Description</label>
-                <textarea id="edit-desc" rows="4"></textarea>
-    
-                <label>Theme</label>
-                <input id="edit-theme" type="text">
-                <!-- v46.4+: meta & link fields -->
-    <label>ID</label>
-    <input id="edit-id" type="text" readonly>
-    
-    <label>Date</label>
-    <input id="edit-date" type="text">
-    
-    <label>Link text</label>
-    <input id="edit-link-text" type="text">
-    
-    <label>Link URL</label>
-    <input id="edit-link-url" type="url" placeholder="https://…">
-    
-    <label>Source</label>
-    <input id="edit-source" type="text" placeholder="e.g. Wikipedia, DOI, book…">
-    
-    <label>Tags (comma-separated)</label>
-    <input id="edit-tags" type="text" placeholder="physics, cosmology">
-    
-    <label>Edited by</label>
-    <input id="edit-edited-by" type="text">
-    
-    <label>Edited at</label>
-    <input id="edit-edited-at" type="text" placeholder="ISO or free text">
-    
-    <label>Created by</label>
-    <input id="edit-created-by" type="text">
-    
-    <label>Created at</label>
-    <input id="edit-created-at" type="text" placeholder="ISO or free text">
+    <!-- v46.4: Inline Event Editor -->
+    <div id="event-editor" hidden>
+        <div class="editor-header">
+            <div class="editor-title">Edit event</div>
+            <button id="close-editor" title="Close editor">×</button>
+        </div>
+        <div class="editor-body">
+            <label>Title</label>
+            <input id="edit-title" type="text">
+
+            <label>Year</label>
+            <input id="edit-year" type="text">
+
+            <label>Description</label>
+            <textarea id="edit-desc" rows="4"></textarea>
+
+            <label>Theme</label>
+            <input id="edit-theme" type="text">
+            <!-- v46.4+: meta & link fields -->
+            <label>ID</label>
+            <input id="edit-id" type="text" readonly>
+            
+            <label>Date</label>
+            <input id="edit-date" type="text">
+            
+            <label>Link text</label>
+            <input id="edit-link-text" type="text">
+            
+            <label>Link URL</label>
+            <input id="edit-link-url" type="url" placeholder="https://…">
+            
+            <label>Source</label>
+            <input id="edit-source" type="text" placeholder="e.g. Wikipedia, DOI, book…">
+            
+            <label>Tags (comma-separated)</label>
+            <input id="edit-tags" type="text" placeholder="physics, cosmology">
+            
+            <label>Edited by</label>
+            <input id="edit-edited-by" type="text">
+            
+            <label>Edited at</label>
+            <input id="edit-edited-at" type="text" placeholder="ISO or free text">
+            
+            <label>Created by</label>
+            <input id="edit-created-by" type="text">
+            
+            <label>Created at</label>
+            <input id="edit-created-at" type="text" placeholder="ISO or free text">
+        </div>
     </div>
-    </div>
-    -->
 
     <div id="page-footer">© 2025 JL · CC BY 4.0</div>
 
@@ -1173,9 +1172,7 @@
 
 <!-- modules in files -->
 
-<!-- TEMP: editor disabled for lens test -->
-<!-- <script src="editor.js"></script> -->
-
+<script src="editor.js"></script> 
 <script src="timeline.js"></script>
 </body>
 

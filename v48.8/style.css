@@ -1,0 +1,807 @@
+/* v46 CSS for History Timeline */
+:root {
+    --bg: #0b0b0c;
+    --fg: #e6e6e6;
+    --muted: #9aa0a6;
+    --accent: #ff8c42;
+    --card: #1a1b1e;
+    --cardText: #ffffff;
+    --footer-h: 16px;        /* v33: footerin vakiokorkeus */
+    --header-h: 56px;    /* vakiokorkeusotsikolle, yliajetaan JS:llä */
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    /* v38: EI 100dvh → iOS Chromen bugit pois */
+    overscroll-behavior: none;
+    font-family: sans-serif;
+    background: #6b6a6a;
+    color: #ddd;
+    overflow: hidden;
+    /* ei pystyscrollia */
+    -webkit-overflow-scrolling: touch;
+}
+
+#page-title {
+    margin: 0.4em 1em 0em 1em; /* top right bottom left */
+    padding-right: 30px;
+    /* varaa tila ?-ikonille (24px koko + ~12–20px väli) */
+    padding-bottom: 0.8em;
+        /* "rivi tyhjää" mittautuu oikein */
+    font-size: 1.12em;
+    font-weight: 300;
+    font-stretch: 85%;
+    letter-spacing: 0.2px;
+}
+
+/* v38: jos muuttuvat fontit käytössä (esim. Inter), kavennetaan vielä */
+@supports (font-variation-settings: normal) {
+    #page-title {
+        font-variation-settings: "wght" 320, "wdth" 85;
+    }
+}
+
+#info-toggle {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2000;
+    /* yli kaiken, myös svg */
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    color: #e49a45bc;
+    width: 30px;
+    height: 30px;
+    /* hitbox hieman suurempi */
+    line-height: 30px;
+    text-align: center;
+    border-radius: 8px;
+
+    /* läpikuultava oranssi badge */
+    background: rgba(255, 138, 66, 0.167);
+    /* “accent” ~ #ff8c42, 28% */
+    border: 1px solid rgba(255, 138, 66, 0.119);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.139),
+        0 0 0 2px rgba(255, 140, 66, 0.12) inset;
+    /* ohut hehku */
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#info-box {
+    position: absolute;
+    top: 50px;
+    right: 10px;
+    display: none;
+    max-width: 240px;
+    padding: 8px 12px;
+    background: rgba(40, 40, 40, 0.85);
+    border: 1px solid #555;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+}
+
+#info-box em {
+    /* v38: korjattu virheellinen sisäkkäisyys */
+    font-style: italic;
+    font-weight: 400;
+}
+
+/* v38: info-box linkkien värit tummalla taustalla, hyvä kontrasti */
+#info-box a {
+    color: #89723b;
+    /* lämmin keltainen/oranssi */
+    text-decoration-thickness: 1.5px;
+}
+
+#info-box a:hover {
+    color: #FFB703;
+    /* kirkkaampi hover */
+}
+
+#info-box a:visited {
+    color: #c6b291;
+    /* hivenen tummempi visited */
+}
+
+#info-box a:focus-visible {
+    outline: 2px solid #FFB703;
+    /* näppis-/kosk. fokus näkyy */
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+#timeline-container {
+    position: fixed;
+    /* v38.fix: täyttää ruudun ilman vh/dvh-ongelmaa */
+    inset: calc(env(safe-area-inset-top) + var(--header-h)) 8px calc(env(safe-area-inset-bottom) + var(--footer-h)) 8px;
+    /* top right bottom left */
+    height: auto;
+    /* ei korkeuden laskentaa → selainpalkit eivät sotke */
+    margin: 0;
+    background: #474646;
+    border: 1px solid #211f1f;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#timeline {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: pan-y pinch-zoom;  /* allow native pinch; we handle horizontal swipe ourselves */
+}
+
+#page-footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--footer-h);
+    line-height: var(--footer-h);    /* vakio rivikorkeus */
+    display: block;
+    text-align: center;
+    padding: 0 8px;
+    margin: 0;
+    background: transparent;
+    backdrop-filter: none;
+    border-top: none;
+    font-size: 8px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;    /* ei rivinvaihtoa */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px));    /* v37: ettei teksti jää loven alle */
+}
+
+/* Kortit ja akselit */
+.axis line,
+.axis path {
+    stroke: #bbbaba;
+}
+
+/* --- Axis fade via CSS variables (v46.1.2) ---
+   Smooth 5 s fade to grey handled entirely by CSS variables. */
+g.axis {
+    /* default (bright) values */
+    --axis-fill: #c9c9c9;
+    --axis-op: .8;
+}
+
+g.axis text {
+    fill: var(--axis-fill);
+    opacity: var(--axis-op);
+    transition: fill 1s ease, opacity 1s ease;
+    will-change: fill, opacity;
+}
+
+/* Dimmed state: after inactivity */
+g.axis.axis-dim {
+    --axis-fill: #8a8a8a;
+    --axis-op: 0.35;
+}
+
+/* v36: major-tickien viivat selkeämmiksi, mutta hillityt */
+.axis .tick line {
+    stroke: #cfcfcf;
+    stroke-opacity: 0.7;
+    stroke-width: 1;
+}
+.minor-grid line {
+    stroke: #d4d3d3;
+    stroke-opacity: 0.75;    /* selvästi himmeämpi kuin major */
+    shape-rendering: crispEdges;
+}
+
+.zoomBar .track {
+    fill: #999;
+    opacity: 0.1;    /* haalea tausta */
+    pointer-events: none; /* ei blokkaa mitään */
+}
+
+/* v36: ikkuna ei peitä sisältöä — kevyempi & klikit läpi */
+.zoomBar .window {
+    fill: var(--accent);
+    opacity: 0.25;
+    stroke: var(--accent);
+    pointer-events: none;
+    /* varmistetaan ettei nappaa klikkejä */
+}
+
+/* --- v46.1: flat cards (no border, no shadow) --- */
+g.card rect {
+    stroke: none;
+    rx: 4;
+    ry: 8;
+    vector-effect: non-scaling-stroke;
+    transition: fill-opacity .35s ease, filter .35s ease;
+}
+
+/* --- v46.3: two-layer cards, flat style (no border, no shadow) --- */
+/* EN: Each card consists of two rects (cardA + cardB).
+   The bottom layer (cardA) is slightly offset; together they form a soft matte edge. */
+
+g.card rect.cardA,
+g.card rect.cardB {
+    stroke: none;
+    rx: 10;
+    ry: 10;
+    transition: fill-opacity .30s ease;
+}
+
+/* EN: Base transparency per layer.
+   Two layers combined give a moderate base color (~1 - (1 - a)^2). */
+g.card rect.cardA {
+    fill-opacity: 0.32;
+}
+
+/* bottom layer */
+g.card rect.cardB {
+    fill-opacity: 0.28;
+}
+
+/* top layer */
+
+/* EN: Active card has stronger fill-opacity on both layers.
+   Two layers combined ≈ 1 - (1 - 0.60)*(1 - 0.52) ≈ 0.81 total opacity. */
+g.card.active rect.cardA {
+    fill-opacity: 0.60;
+}
+
+/* deeper, richer base */
+g.card.active rect.cardB {
+    fill-opacity: 0.82;
+}
+
+/* v35: font  better mobiilissa */
+@media (max-width: 480px) {
+    .card-group text.event-label {
+        font-size: 9px;
+    }
+}
+
+.event-label {
+    fill: #dedede;
+    /* tapahtumien tekstit */
+    font-family: Georgia, "Times New Roman", serif;
+    /* pakota serif */
+        font-size: 9px;
+            /* pienempi desktopilla */
+            letter-spacing: .1px;
+            /* pieni luettavuus-tweak */
+}
+
+.card-title {
+    fill: #d7d5d5;    /* teemojen otsikot korteissa */
+    font-weight: bold;
+}
+
+@media (max-width: 480px) {
+    #page-title {
+        font-size: 1.1em;
+    }
+
+    .axis text,
+    .card-group text {
+        font-size: 11px;
+    }}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+}
+
+#plot-rect {
+    fill: none !important;
+    stroke: none !important;
+}
+
+/* v36: globaali haalennuskerros */
+.global-dim-rect {
+    fill: #bcbbbb;
+    opacity: 0;
+    /* näkyy vain kun activeTheme on */
+    pointer-events: none;
+    /* klikkaukset menevät läpi passiivisiin kortteihin */
+    transition: opacity .12s ease;
+}
+
+/* v38: estä iOS/Android copy/select/callout aikajanan alueella */
+#timeline-container,
+#timeline,
+#timeline * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    /* iOS long-press menu pois */
+    -webkit-tap-highlight-color: transparent;
+    /* poista sininen highlight */
+}
+
+/* jätä infolaatikon tekstit valittaviksi */
+#info-box,
+#info-box * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+/* v40: Zoom bar is indicator-only; let all input pass through it */
+svg .zoomBar,
+svg .zoomBar .track,
+svg .zoomBar .window,
+svg .zoomBar .hit {
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    #touch-cursor,
+    .touch-ripple {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* v42 fix: ensure all SVG children under #timeline allow only vertical pan,
+   so horizontal gestures are free for our custom zoom logic even on cards */
+#timeline,
+#timeline * {
+    touch-action: pan-y;
+}
+/* v41: lock native scrolling during gesture (zoom or pan) */
+#timeline.gesture-active,
+#timeline-container.gesture-active {
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+
+/* v42: center zoom indicator visuals (accent-colored, dashed) */
+.centerZoomLine {
+    stroke: var(--accent);
+    /* use theme accent (e.g., #ff8c42) */
+    stroke-opacity: 0.85;
+    /* light, not too strong */
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    /* dashed hairline */
+    stroke-linecap: butt;
+    /* crisp dashes */
+    shape-rendering: crispEdges;
+    pointer-events: none;
+    /* purely visual */
+}
+
+.centerZoomLabel {
+    fill: var(--accent);
+    /* match the line color */
+    fill-opacity: 0.7;
+    font-size: 14px;
+    font-family: sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    /* purely visual */
+    /* subtle readability halo without heavy shadow */
+    paint-order: stroke;
+    /* paint outline underneath */
+    stroke: rgba(0, 0, 0, 0.35);
+    /* soft outline for contrast */
+    stroke-width: 0.6px;
+    stroke-linejoin: round;
+}
+
+/* optional future-use: the pad is invisible and does NOT catch input yet */
+.centerZoomPad {
+    fill: transparent;
+    pointer-events: none;
+    /* keep off for now */
+    /* If/when you want the pad to handle zoom-only input, switch to:
+     pointer-events: all; touch-action: none; */
+}
+/* 
+   v48.3 Prefocus Scaling Fix (Unified transform for passive + active cards)
+   ------------------------------------------------------------------------
+   Problem:
+   Active cards are moved to <g.active-layer>. When prefocus is applied, the
+   logic prefers the active-layer copy of the event node. If CSS uses separate
+   scaling variables (e.g. --s → scale), the browser often fails to detect a 
+   proper before→after transition when the DOM node is reparented. This causes 
+   the event label on the active card to "snap" to the larger scale instead of 
+   animating smoothly (unlike passive cards).
+
+   Fix:
+   Use ONE consistent transform path for all event labels:
+     transform: translateY(var(--ty)) scale(...)
+   The prefocus state sets the full transform (scale(1.28)) directly, not via
+   a CSS variable. This guarantees the browser always sees a simple transition 
+   from scale(1) → scale(1.28), regardless of layer changes.
+
+   Result:
+   Both passive cards and the active card animate identically. No snapping,
+   no offset jumps, no differences caused by layer reparenting.
+*/
+
+text.event-label {
+    transform: translateY(var(--ty, 0px)) scale(1);
+    transform-origin: 0% 45%;
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1);
+    will-change: transform;
+}
+
+g.e.is-prefocus text.event-label {
+    transform: translateY(var(--ty, 0px)) scale(1.28);
+    font-weight: 700;
+    letter-spacing: 0.25px;
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, .40);
+    stroke-width: .9px;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, .45));
+}
+/* v48.5: Disable prefocus scale on small screens to avoid visual jump.
+   EN: On mobile, keep only the vertical halo offset; no scale animation. */
+@media (max-width: 800px) {
+    g.e.is-prefocus text.event-label {
+        transform: translateY(var(--ty, 0px)) scale(1);
+    }
+}
+
+g.e.is-prefocus line.event-line {
+    stroke: var(--accent);
+    stroke-width: 2px;
+    opacity: .95;
+    transition: stroke-width .18s ease-out, opacity .18s ease-out;
+}
+
+/* Ensure active-layer nodes use the same transform transition.
+   Without this, some browsers drop the transition after reparenting. */
+g.active-layer text.event-label {
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1) !important;
+}
+
+/* v42.3: Event "More info" popover (animated) */
+#event-info {
+    position: fixed;
+    z-index: 2200;
+    max-width: min(320px, 60vw);
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #eee;
+    background: rgba(28, 28, 30, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .45);
+
+    /* animation states (hidden by default) */
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+    pointer-events: none;
+    visibility: hidden;
+    transition: opacity 140ms ease-out, transform 160ms ease-out, visibility 0s linear 160ms;
+}
+
+/* visible state */
+#event-info.is-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+    visibility: visible;
+    transition: opacity 140ms ease-out, transform 160ms ease-out, visibility 0s;
+}
+
+#event-info .title {
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: #ffd399;
+}
+
+#event-info .meta {
+    font-size: 11px;
+    color: #c8c8c8;
+    opacity: .9;
+    margin-bottom: 6px;
+}
+
+#event-info .body {
+    white-space: pre-wrap;
+    color: #eaeaea;
+}
+
+#event-info .hint {
+    margin-top: 8px;
+    font-size: 10px;
+    color: #9aa0a6;
+}
+
+#event-info a {
+    color: #ffb703;
+    text-decoration-thickness: 1.5px;
+}
+
+#event-info a:visited {
+    color: #d1b67e;
+}
+#event-info .actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+#event-info .actions .edit-event {
+    font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #666;
+    background: #2a2a2a;
+    color: #ffd399;
+    cursor: pointer;
+}
+
+#event-info .actions .edit-event:hover {
+    background: #333;
+    border-color: #777;
+}
+/* --- v47.4: inline event editor --- */
+#event-editor {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #1b1b1b;
+    border-top: 1px solid #444;
+    padding: 12px;
+    font: 400 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color: #eee;
+    z-index: 2800;
+    /* above event-info (2200) and help (2600) */
+}
+
+#event-editor[hidden] {
+    display: none;
+}
+
+#event-editor .editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#event-editor .editor-title {
+    font-weight: 600;
+    color: #ffd399;
+    letter-spacing: 0.5px;
+}
+
+#close-editor {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #999;
+    cursor: pointer;
+}
+
+#close-editor:hover {
+    color: #ffd399;
+}
+
+#event-editor label {
+    display: block;
+    font-size: 12px;
+    margin-top: 6px;
+    color: #aaa;
+}
+
+#event-editor input,
+#event-editor textarea {
+    width: 100%;
+    margin-top: 2px;
+    padding: 5px 6px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #222;
+    color: #eee;
+    font: inherit;
+    resize: vertical;
+}
+/* v46.4+: editor form layout */
+#event-editor .editor-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+}
+
+#event-editor .editor-body label {
+    grid-column: span 1;
+}
+
+#event-editor .editor-body input,
+#event-editor .editor-body textarea {
+    grid-column: span 1;
+}
+
+body.editor-open #event-info {
+    pointer-events: none;
+}
+
+/* Long fields spanning both columns */
+#edit-desc,
+#edit-link-url {
+    grid-column: 1 / -1;
+}
+
+/* Mobile: single column + full-screen editor that respects the top header/info */
+@media (max-width: 640px) {
+
+    /* EN: Make the editor a scrollable full-screen panel,
+         but start *below* the fixed header area so page title and "?" stay visible. */
+    #event-editor {
+        position: fixed;
+        left: 0;
+        right: 0;
+
+        /* keep the top bar visible (title + ? info button) */
+        top: calc(env(safe-area-inset-top) + var(--header-h));
+        bottom: 0;
+
+        z-index: 2800;
+        /* under #info-toggle (2000) and #event-info (2200) */
+        margin: 0;
+        width: 100vw;
+        height: auto;
+        /* height defined by top/bottom */
+        max-width: none;
+        border-radius: 0;
+        padding: 10px 12px 14px;
+        overflow: auto;
+        /* scroll inside the editor */
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Collapse form to one column on small screens */
+    #event-editor .editor-body {
+        display: grid;
+        grid-template-columns: 1fr !important;
+        gap: 8px 10px;
+    }
+
+    #event-editor .editor-body input,
+    #event-editor .editor-body textarea,
+    #event-editor .editor-body label {
+        grid-column: 1 / -1;
+    }
+
+    /* Slightly tighter typography for mobile */
+    #event-editor .editor-body label {
+        font-size: 13px;
+        opacity: .9;
+    }
+
+    #event-editor input,
+    #event-editor textarea,
+    #event-editor select {
+        font-size: 14px;
+    }
+
+    /* Keep action buttons handy */
+    #event-editor .editor-actions {
+        position: sticky;
+        bottom: 0;
+        background: inherit;
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+}
+/* v47.3 – mobile fix: keep Close visible, wrap header buttons cleanly */
+@media (max-width: 640px) {
+
+    /* Header becomes multi-row and reserves space for the close button */
+    #event-editor .editor-header {
+        display: flex;
+        flex-wrap: wrap;
+        /* allow actions to go to a new line */
+        align-items: center;
+        gap: 8px;
+        position: relative;
+        /* anchor for the absolute close button */
+        padding-right: 38px;
+        /* reserve room for the close (×) button */
+    }
+
+    /* Title can expand; keeps layout stable when buttons wrap */
+    #event-editor .editor-header .editor-title {
+        flex: 1 1 auto;
+    }
+
+    /* Actions bar: full-width row under the title, can wrap */
+    #event-editor .editor-header .editor-actions {
+        flex: 1 1 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 4px;
+    }
+
+    /* Close stays in the top-right corner, above the buttons */
+    #close-editor {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        z-index: 10;
+    }
+}
+
+/* EN: The advanced/"More fields" section created by editor.js */
+.advanced-fields[hidden] {
+    display: none !important;
+}
+
+.advanced-fields {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.25);
+    opacity: 0.95;
+}
+
+/* Respect reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+
+    #event-info,
+    #event-info.is-visible {
+        transition: none;
+    }
+}
+/* v46.2: global dim layer dims cards and text but not axis */
+#dimLayer {
+    pointer-events: none;
+    transition: opacity .18s ease;
+}
+/* v48.2: hard-disable native long-press UI on labels (iOS Safari) */
+#timeline text.event-label {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+/* v48.4 – Full active card overlay above dim mask.
+   Shows the entire active card (background + lines + texts) fully bright.
+   Overlay is non-interactive, static, and does not animate. 
+*/
+#gActiveOverlay {
+    pointer-events: none;
+}
+
+.active-card-overlay {
+    opacity: 1 !important;
+    filter: none !important;
+    stroke: none !important;
+    fill-opacity: 1 !important;
+    pointer-events: none !important;
+}
+
+#gActiveOverlay text {
+    fill: #fff !important;
+}
+
+/* NEW: ensure overlay event labels animate like normal labels */
+#gActiveOverlay text.event-label {
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1);
+    will-change: transform;
+}
+
+#gActiveOverlay line {
+    stroke: #fff !important;
+    opacity: 1 !important;
+}

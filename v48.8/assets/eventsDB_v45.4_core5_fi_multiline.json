@@ -1,0 +1,65 @@
+{
+"meta": {
+  "version": "v45.4",
+  "updated": "2025-10-20",
+  "language": "fi",
+  "description": "Aikajanan absoluuttinen tietokanta, log-aikaskaalaa varten. Teemat pakotettu viiden perusluokan settiin.",
+  "themes": {
+    "kosmos": {
+      "color": "#6372b2",
+      "label": "kosmos"
+    },
+    "biologia": {
+      "color": "#70a8c6",
+      "label": "biologia"
+    },
+    "ihmiskunta": {
+      "color": "#4b9fa8",
+      "label": "ihmiskunta"
+    },
+    "historia": {
+      "color": "#368d60",
+      "label": "historia"
+    },
+    "moderni teknologia": {
+      "color": "#5a9646",
+      "label": "moderni teknologia"
+    }
+  }
+},
+"events": [
+{"theme":"kosmos","id":"big-bang","label":"Alkuräjähdys","year":-13800000000,"author":"ChatGPT","info":"Universumin alku noin 13,8 miljardia vuotta sitten.","ref":"https://fi.wikipedia.org/wiki/Alkur%C3%A4j%C3%A4hdys","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"milky-way","label":"Linnunrata syntyy","year":-13000000000,"author":"ChatGPT","info":"Linnunradan varhaiset tähdet syntyivät pian alkuräjähdyksen jälkeen.","ref":"https://fi.wikipedia.org/wiki/Linnunrata","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"solar-system","label":"Aurinkokunta muodostuu","year":-4567000000,"author":"ChatGPT","info":"Aurinko ja planeetat muodostuvat kaasu- ja pölypilvestä.","ref":"https://fi.wikipedia.org/wiki/Aurinkokunta","language":"fi","edit_date":"2025-10-20"},
+{"theme":"biologia","id":"origin-life","label":"Elämän alku (LUCA)","year":-3800000000,"author":"ChatGPT","info":"Viimeinen yhteinen kantamuoto (LUCA) syntyy maapallolla.","ref":"https://fi.wikipedia.org/wiki/El%C3%A4m%C3%A4n_synty","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"oxidation","label":"Suurhappitapahtuma","year":-2400000000,"author":"ChatGPT","info":"Cyanobakteerit tuottavat happea, joka muuttaa ilmakehän koostumusta.","ref":"https://fi.wikipedia.org/wiki/Suurhappitapahtuma","language":"fi","edit_date":"2025-10-20"},
+{"theme":"biologia","id":"first-eukaryotes","label":"Ensimmäiset aitotumaiset","year":-2000000000,"author":"ChatGPT","info":"Syntyvät solut, joilla on tuma ja soluelimiä.","ref":"https://fi.wikipedia.org/wiki/Aitotumainen","language":"fi","edit_date":"2025-10-20"},
+{"theme":"biologia","id":"cambrian","label":"Kambri räjähdys","year":-541000000,"author":"ChatGPT","info":"Monisoluisten eliöiden nopea monimuotoistuminen.","ref":"https://fi.wikipedia.org/wiki/Kambri","language":"fi","edit_date":"2025-10-20"},
+{"theme":"biologia","id":"land-plants","label":"Kasvit maalle","year":-470000000,"author":"ChatGPT","info":"Kasvit siirtyvät maalle, mikä muuttaa ekosysteemejä.","ref":"https://fi.wikipedia.org/wiki/Maalle_siirtyminen_(kasvit)","language":"fi","edit_date":"2025-10-20"},
+{"theme":"biologia","id":"dinosaurs","label":"Dinosaurukset ilmestyvät","year":-230000000,"author":"ChatGPT","info":"Ensimmäiset dinosaurukset kehittyvät triaskaudella.","ref":"https://fi.wikipedia.org/wiki/Dinosaurukset","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"kpg","label":"K–Pg-sukupuutto","year":-66000000,"author":"ChatGPT","info":"Asteroiditörmäys aiheuttaa dinosaurusten sukupuuton.","ref":"https://fi.wikipedia.org/wiki/K–Pg-sukupuutto","language":"fi","edit_date":"2025-10-20"},
+{"theme":"ihmiskunta","id":"hominins","label":"Varhaisimmat hominiinit","year":-7000000,"author":"ChatGPT","info":"Ihmisen varhaiset esi-isät eriytyvät apinoista.","ref":"https://fi.wikipedia.org/wiki/Hominini","language":"fi","edit_date":"2025-10-20"},
+{"theme":"ihmiskunta","id":"homo-sapiens","label":"Homo sapiens ilmestyy","year":-300000,"author":"ChatGPT","info":"Nykyaikainen ihminen kehittyy Afrikassa.","ref":"https://fi.wikipedia.org/wiki/Ihmisen_evoluutio","language":"fi","edit_date":"2025-10-20"},
+{"theme":"ihmiskunta","id":"out-of-africa","label":"Ihminen leviää Afrikasta","year":-70000,"author":"ChatGPT","info":"Ensimmäinen laaja Homo sapiens -muutto Afrikan ulkopuolelle.","ref":"https://fi.wikipedia.org/wiki/Ihmisen_evoluutio","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"lgm","label":"Viimeisin jääkauden huippu","year":-21000,"author":"ChatGPT","info":"Jäätiköt laajimmillaan, meriveden pinta alhaalla.","ref":"https://fi.wikipedia.org/wiki/J%C3%A4%C3%A4kausi","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"gobekli-tepe","label":"Göbekli Tepe","year":-9600,"author":"ChatGPT","info":"Varhaisin tunnettu monumentaalinen temppelialue Turkissa.","ref":"https://fi.wikipedia.org/wiki/G%C3%B6bekli_Tepe","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"agriculture","label":"Maanviljelyn alku","year":-9000,"author":"ChatGPT","info":"Ihmiset alkavat viljellä maata ja kesyttää eläimiä.","ref":"https://fi.wikipedia.org/wiki/Maanviljelys","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"wheel","label":"Pyörän keksintö","year":-3500,"author":"ChatGPT","info":"Ensimmäiset pyörät Mesopotamiassa.","ref":"https://fi.wikipedia.org/wiki/Py%C3%B6r%C3%A4","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"pyramids","label":"Gizan pyramidit","year":-2560,"author":"ChatGPT","info":"Kheopsin pyramidi rakennetaan Egyptissä.","ref":"https://fi.wikipedia.org/wiki/Gizan_pyramidit","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"buddha","label":"Buddhan syntymä","year":-563,"author":"ChatGPT","info":"Siddhartha Gautama syntyy Lumbinissa.","ref":"https://fi.wikipedia.org/wiki/Buddha","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"roman-empire","label":"Rooman valtakunta","year":-27,"author":"ChatGPT","info":"Rooma muuttuu keisarikunnaksi Augustuksen johdolla.","ref":"https://fi.wikipedia.org/wiki/Rooman_valtakunta","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"printing-press","label":"Painokone (Gutenberg)","date":"1450-01-01","author":"ChatGPT","info":"Liikuteltavat metalliset kirjasimet mullistavat viestinnän.","ref":"https://fi.wikipedia.org/wiki/Painokone","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"ww2","label":"Toinen maailmansota","date":"1939-09-01","author":"ChatGPT","info":"Maailmansota 1939–1945, yli 70 miljoonaa kuollutta.","ref":"https://fi.wikipedia.org/wiki/Toinen_maailmansota","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"finnish-independence","label":"Suomen itsenäisyysjulistus","date":"1917-12-06","author":"ChatGPT","info":"Suomi julistautuu itsenäiseksi Venäjästä.","ref":"https://fi.wikipedia.org/wiki/Suomen_itsen%C3%A4istyminen","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"sputnik","label":"Sputnik 1 laukaisu","date":"1957-10-04","author":"ChatGPT","info":"Ensimmäinen keinotekoinen satelliitti avaruuteen.","ref":"https://fi.wikipedia.org/wiki/Sputnik_1","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"apollo-11","label":"Apollo 11 – Kuu-lasku","date":"1969-07-20","author":"ChatGPT","info":"Ihminen astuu ensimmäistä kertaa Kuun pinnalle.","ref":"https://fi.wikipedia.org/wiki/Apollo_11","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"arpanet","label":"Ensimmäinen ARPANET-viesti","date":"1969-10-29","author":"ChatGPT","info":"Internetin esiaste saa ensimmäisen viestin.","ref":"https://fi.wikipedia.org/wiki/ARPANET","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"berlin-wall","label":"Berliinin muurin murtuminen","date":"1989-11-09","author":"ChatGPT","info":"Saksan jälleenyhdistyminen alkaa.","ref":"https://fi.wikipedia.org/wiki/Berliinin_muuri","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"human-genome","label":"Ihmisen genomin valmistuminen","date":"2003-04-14","author":"ChatGPT","info":"Ihmisen koko DNA-järjestys saadaan valmiiksi.","ref":"https://fi.wikipedia.org/wiki/Ihmisen_genomi","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"iphone","label":"iPhonen julkaisu","date":"2007-01-09","author":"ChatGPT","info":"Älypuhelinten aikakausi alkaa Applen julkaisulla.","ref":"https://fi.wikipedia.org/wiki/IPhone","language":"fi","edit_date":"2025-10-20"},
+{"theme":"moderni teknologia","id":"higgs","label":"Higgsin bosonin löytö","date":"2012-07-04","author":"ChatGPT","info":"CERN julkistaa Higgsin hiukkasen löytymisen.","ref":"https://fi.wikipedia.org/wiki/Higgsin_bosoni","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"m87-bh","label":"Ensimmäinen mustan aukon kuva (M87*)","date":"2019-04-10","author":"ChatGPT","info":"Event Horizon Telescope julkaisee kuvan M87*:stä.","ref":"https://fi.wikipedia.org/wiki/Mustat_aukot","language":"fi","edit_date":"2025-10-20"},
+{"theme":"historia","id":"covid","label":"COVID-19 julistetaan pandemiaksi","date":"2020-03-11","author":"ChatGPT","info":"WHO julistaa COVID-19-pandemian alkaneeksi.","ref":"https://fi.wikipedia.org/wiki/COVID-19","language":"fi","edit_date":"2025-10-20"},
+{"theme":"kosmos","id":"jwst","label":"JWST ensimmäiset kuvat","date":"2022-07-12","author":"ChatGPT","info":"James Webb -teleskoopin ensimmäiset tieteelliset kuvat julkaistaan.","ref":"https://fi.wikipedia.org/wiki/James_Webb_-avaruusteleskooppi","language":"fi","edit_date":"2025-10-20"}
+]
+}
