@@ -1,4 +1,4 @@
-// timeline.js — v48.4 stable (2025-11)
+// timeline.js — v49  new  prefocus zoom lens (2025-12)
 // Pure renderer: all data preloaded by index.html (TS_DATA_P / TS_DATA)
 // This version removes redundant Util fallbacks and old I/O logic.
 
@@ -48,7 +48,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
     const ACTIVATE_DELAY = (window.TS_DELAY && TS_DELAY.ACTIVATE) || 1000;
     const ZOOM_DELAY = (window.TS_DELAY && TS_DELAY.ZOOM) || 1500;
 
-    // --- tila ---
+    // --- state ---
     const state = {
         width: 0, height: 0,
         yBase: null, y: null,
@@ -59,6 +59,58 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         activeTheme: null, // v36: klikatun kortin teema
         themeColors: new Map()
     };
+
+    // v49: vertical lens configuration (now gently active)
+    const lensCfg = {
+        cy: 0,          // center line in gRoot coords (set in layoutCenterOverlay)
+        R: 0,           // radius in px            (set in layoutCenterOverlay)
+        k: 0.75,        // deformation strength; 0.75 ≈ demo feel
+        zMax: 1.30      // max horizontal scale for labels (wired later)
+    };
+
+    // 0–1 smoothstep
+    function smoothStep01(x) {
+        x = Math.max(0, Math.min(1, x));
+        return x * x * (3 - 2 * x);
+    }
+
+    // Vertical lens mapping: for now behaves as identity (because k=0 or R<=0)
+    function lensY(y0) {
+        const cy = lensCfg.cy;
+        const R = lensCfg.R;
+        const k = lensCfg.k;
+
+        if (!Number.isFinite(R) || R <= 0 || !Number.isFinite(k) || k === 0) {
+            return y0;
+        }
+
+        const d = y0 - cy;           // distance from center line
+        const n = Math.abs(d) / R;   // 0 = center, 1 = edge
+
+        if (n >= 1) return y0;       // outside lens → no deformation
+
+        // 1 in center, 0 at edge (smooth edge)
+        const t = smoothStep01(n);   // 0 → center, 1 → edge
+        const m = 1 - t;             // 1 center, 0 edge
+
+        const factor = 1 + k * m;    // k controls how strongly we stretch from center
+        return cy + d * factor;
+    }
+
+    // Matching horizontal scale mask for labels; currently always 1
+    function lensScale(yScreen) {
+        const cy = lensCfg.cy;
+        const R = lensCfg.R;
+        const zMax = Math.max(1, Number.isFinite(lensCfg.zMax) ? lensCfg.zMax : 1);
+
+        if (!Number.isFinite(R) || R <= 0 || zMax <= 1) return 1;
+
+        const n = Math.abs(yScreen - cy) / R;
+        if (n >= 1) return 1;   // outside lens → no extra scale
+
+        const m = 1 - smoothStep01(n); // 1 center, 0 edge
+        return 1 + (zMax - 1) * m;
+    }
 
     let autoZooming = false; // v38: estä RO ylikirjoittamasta autofocus-animaatiota
 
@@ -80,6 +132,17 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
     const gRoot = svg.append("g").attr("class", "root");
     const gCards = gRoot.append("g").attr("class", "cards");
+
+    // --- Lens band group (background column for the vertical lens) ---
+    const gLens = gRoot.append("g").attr("class", "lens");
+    const lensRect = gLens.append("rect")
+        .attr("class", "lens-band")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", 0)      // set in layoutCenterOverlay()
+        .attr("height", 0)
+        .attr("rx", 10)
+        .attr("ry", 10);
 
     // --- NEW: single global dim rectangle between cards and axis ---
     const gDim = gRoot.append("rect")
@@ -158,12 +221,15 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
     function setZOrder() {
         gCards.lower();         // 1. all cards
-        gDim.raise();           // 2. global dim layer
 
-        gActiveOverlay.raise(); // 3. overlay-card ABOVE dim (this fixes dimming)
+        // 2. lens background above cards, below dim
+        gLens.raise();
 
-        gActive.raise();        // 4. legacy active-layer (empty in v48.4)
-        gAxis.raise();          // 5. axis always top
+        gDim.raise();           // 3. global dim layer
+
+        gActiveOverlay.raise(); // 4. overlay-card ABOVE dim (this fixes dimming)
+        gActive.raise();        // 5. legacy active-layer (empty in v48.4)
+        gAxis.raise();          // 6. axis always top
     }
 
     // v44.1 – scale-aware pan bounds using your tuned base (0.6 × h)
@@ -323,10 +389,23 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             .attr("x", Math.round((geom.xLeft + geom.xRight) / 1.2)) // slightly to the right
             .attr("y", geom.midY - 8);
 
-        console.log("[DBG hairline]",
-            "midY=", geom.midY,
-            "gRoot offset=", cfg.margin.top);
+        // --- Lens background band (in gRoot coordinates) ------------------
+        // gRoot is translated by (rootTX, margin.top), so convert from screen Y
+        // --- Lens background band (in gRoot coordinates) ------------------
+        // gRoot is translated by (rootTX, margin.top), so convert from screen Y
+        const rootTX = cfg.margin.left - 24;
+        const clipWidthLocal = Math.max(0, state.width - rootTX - 8);
+        const bandTopLocal = geom.zoneY - cfg.margin.top;
 
+        lensRect
+            .attr("x", 0)
+            .attr("y", bandTopLocal)
+            .attr("width", clipWidthLocal)
+            .attr("height", geom.zoneH);
+
+        // v49: align lens center & radius with the center band
+        lensCfg.cy = bandTopLocal + geom.zoneH / 2;
+        lensCfg.R = geom.zoneH / 2;
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
@@ -352,8 +431,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         const cy = geom.midY - top - 0.5 * (bot - top);
 
         return Math.round(cy);
-        console.log("[DBG anchor]", "cy=", cy, "height=", state.height);
-
     }
 
     function computePrefocusData() {
@@ -475,7 +552,9 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         {
             const prevY = state.__prefocusY;
             if (prevY != null) {
-                const bestY = state.y(best.time_years);
+                const bestY = (state._yMap && state._yMap.has(best))
+                    ? state._yMap.get(best)
+                    : state.y(best.time_years);
                 const STICKY = Math.max(12, Math.min(36, innerHeight() * 0.03));
                 if (Math.abs(bestY - prevY) <= STICKY) {
                     allowed = Math.max(allowed, R + H);
@@ -499,9 +578,10 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 }
             }
         }
-
         // 3) Only keep prefocus if within allowed distance + dead-band
-        const newY = state.y(best.time_years);
+        const newY = (state._yMap && state._yMap.has(best))
+            ? state._yMap.get(best)
+            : state.y(best.time_years);
         // DB=0: never quantize Y (smooth follow). You can set to 1 if you want a tiny noise guard.
         const DB = 0;
 
@@ -518,11 +598,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             state.__prefocusY = null;
         }
 
-        console.log("[DBG prefocus]",
-            "key=", state.__prefocusKey,
-            "yy=", newY,
-            "cy=", cy,
-            "dist=", bestDist);
     }
 
     function markPrefocusClass() {
@@ -594,12 +669,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 const ln = lineNode.getBoundingClientRect();
                 const labelMidY = lb.top + lb.height / 2;
                 const hairlineY = ln.top; // line is almost 1px high → top ≈ center
-                console.log("[DBG screen]",
-                    "key=", key,
-                    "labelMidY=", labelMidY.toFixed(1),
-                    "hairlineY=", hairlineY.toFixed(1),
-                    "delta=", (labelMidY - hairlineY).toFixed(1)
-                );
             }
         } catch (e) {
             console.warn("[DBG screen] failed", e);
@@ -659,6 +728,13 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             .tickFormat(() => ""); // empty: we draw superscript ourselves
         gAxis.call(axis);
 
+        // v49: move tick groups to lens-mapped Y positions
+        gAxis.selectAll("g.tick").attr("transform", function (d) {
+            const y0 = y(d);
+            const yL = lensY(y0);
+            return `translate(0,${yL})`;
+        });
+
         // Build labels like “10^n” using tspans (superscript)
         gAxis.selectAll("g.tick > text").text("");
         gAxis.selectAll("g.tick").each(function (d, i) {
@@ -681,9 +757,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
         const minors = Ticks.minorsFromDomain(d0, d1, showMinor);
         for (const v of minors) {
+            const y0 = y(v);
+            const yL = lensY(y0);
             gMinor.append("line")
                 .attr("x1", -4).attr("x2", 0)
-                .attr("y1", y(v)).attr("y2", y(v));
+                .attr("y1", yL).attr("y2", yL);
         }
     }
 
@@ -698,8 +776,9 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             const minL = d3.min(logs), maxL = d3.max(logs);
             return {
                 theme: th,
-                yTopEv: state.y(Math.pow(10, maxL)),   // ylimmän (vanhimman) eventin y
-                yBotEv: state.y(Math.pow(10, minL)),   // alimman (uusimman) eventin y
+                // v49: card extent goes through lensY (currently identity because k=0/R=0)
+                yTopEv: lensY(state.y(Math.pow(10, maxL))),   // ylimmän (vanhimman) eventin linssattu y
+                yBotEv: lensY(state.y(Math.pow(10, minL))),   // alimman (uusimman) eventin linssattu y
                 color: colorForTheme(th),
                 events: list
             };
@@ -782,6 +861,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
             const evEnt = evSel.enter().append("g").attr("class", "e");
             evEnt.append("line").attr("class", "event-line");
+            // v49: background rect for prefocus label mask
+            evEnt.append("rect")
+                .attr("class", "label-bg")
+                .attr("width", 0)
+                .attr("height", 0)
+                .style("opacity", 0);
             evEnt.append("text")
                 .attr("class", "event-label")
                 .attr("x", 18)
@@ -795,10 +880,12 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 .style("will-change", "transform");
 
             evSel.exit().remove();
-
             evSel.merge(evEnt).each(function (e) {
+                const gg = d3.select(this);
+                const textSel = gg.select("text.event-label");
+
                 // EN: keep inline transition across merges (some browsers drop it on reparent)
-                d3.select(this).select("text.event-label")
+                textSel
                     .style("transform-box", "view-box")      // keep origin stable across layers
                     .style("transform-origin", "0% 50%")
                     .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
@@ -806,7 +893,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
                 const yy0 = state.y(e.time_years);
                 const yy = Math.round(yy0); // v48: snap to device pixel
-                const gg = d3.select(this);
 
                 // Keep lines at data Y (axis-aligned, no visual offset)
                 gg.select("line.event-line")
@@ -814,39 +900,39 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     .attr("y1", yy).attr("y2", yy)
                     .attr("stroke", "#aaa");
 
-                // v48.4: use the visual center hairline as the halo anchor
-                // EN: This keeps the prefocus zoomed label vertically locked to the center
-                //     line on mobile (no "jump ~20% down" when it crosses the hairline).
-                let yFoc = null;
-                if (typeof getFocusAnchorY === "function") {
-                    try {
-                        yFoc = getFocusAnchorY();
-                    } catch (_) {
-                        yFoc = null;
-                    }
-                }
+                // v49: no legacy halo Y-offset; labels stay at their data Y.
+                const textOffsetY = 0;
 
-                // Fallback to the frozen prefocus Y if the anchor cannot be computed
-                if (yFoc == null) {
-                    const yFocRaw = (state.__prefocusY_frozen != null)
-                        ? state.__prefocusY_frozen
-                        : state.__prefocusY;
-                    yFoc = (yFocRaw == null) ? yy : Math.round(yFocRaw);
-                }
-
-                // v48.6: Use the same halo offset for focused and non-focused events.
-                // EN: Let the prefocus label move naturally with scrolling instead of
-                //     being hard-locked to the center line on mobile/desktop.
-                let textOffsetY = (Util && typeof Util.textHaloOffset === "function")
-                    ? Math.round(Util.textHaloOffset(yy, yFoc))
-                    : 0;
-
-                gg.select("text.event-label")
+                const labelSel = textSel
                     .attr("x", 12)
                     .attr("y", yy)                       // keep baseline at integer y (no layout thrash)
-                    .style("--ty", `${textOffsetY}px`)   // halo offset via CSS variable → GPU transform
+                    .style("--ty", `${textOffsetY}px`)   // kept for now; always 0px
                     .text(Util.eventTitleShort(e));
 
+                // v49: show background rect only for prefocus event
+                const labelNode = labelSel.node();
+                const bgSel = gg.select("rect.label-bg");
+                const isPrefocus = gg.classed("is-prefocus");
+
+                if (labelNode && labelNode.getBBox && !bgSel.empty()) {
+                    if (isPrefocus) {
+                        const bbox = labelNode.getBBox();
+                        const padX = 6;
+                        const padY = 3;
+                        bgSel
+                            .attr("x", bbox.x - padX)
+                            .attr("y", bbox.y - padY)
+                            .attr("width", bbox.width + 2 * padX)
+                            .attr("height", bbox.height + 2 * padY)
+                            .style("opacity", 1);
+                    } else {
+                        // hide background for non-prefocus events
+                        bgSel
+                            .attr("width", 0)
+                            .attr("height", 0)
+                            .style("opacity", 0);
+                    }
+                }
             });
 
             // v47.7/v48.7: mobile-friendly double-tap + long-press (pointer-based)
@@ -1067,8 +1153,15 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             // 1) draw
             if (typeof drawAxis === "function") timed("drawAxis", () => safe(drawAxis, "drawAxis"));
             if (typeof drawCards === "function") timed("drawCards", () => safe(drawCards, "drawCards"));
-            state._yMap = new Map();
-            for (const e of state.events) state._yMap.set(e, state.y(e.time_years));
+
+            // v49: cache lens-mapped Y for all events (prefocus uses this map)
+            const yMap = new Map();
+            for (const e of state.events) {
+                const y0 = state.y(e.time_years);
+                const yL = lensY(y0);
+                yMap.set(e, yL);
+            }
+            state._yMap = yMap;
 
             // 2) mark prefocus on rendered nodes (no feedback loop)
             // EN: Defer class toggle to next frame so CSS transition sees a before→after change (fixes jump on active card).
@@ -1077,76 +1170,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 try { markPrefocusClass(); } finally { window.__mpfRaf = null; }
             });
 
-                    /* PrefocusInfo: request popup only after we know the current prefocus target.
-            - key: a stable identifier for the focused event (matches how you build the prefocus key)
-            - resolver(): computes the event label's bounding box and returns { box, data } for positioning
-            */
-            /* PrefocusInfo: only notify on key change or shortly after real motion.
-                - Prevents present-loop re-firing the same popup every second on mobile.
-            */
-            if (window.PrefocusInfo && typeof PrefocusInfo.onPrefocus === 'function') {
-                const key = (state && state.__prefocusKey) ? state.__prefocusKey : null;
-                // v47.8: Freeze the "halo anchor" (prefocus Y) between real motions.
-                // Only refresh the frozen anchor when there was recent user motion.
-                (function freezeHaloAnchor() {
-                    try {
-                        const now = Date.now();
-                        const freshMotion = (now - (window.__LAST_MOTION_TS__ || 0)) <= 800; // ms
-                        if (freshMotion) {
-                            state.__prefocusY_frozen = (state.__prefocusY == null) ? null : Math.round(state.__prefocusY);
-                        } else if (state.__prefocusY_frozen == null) {
-                            // first run fallback
-                            state.__prefocusY_frozen = (state.__prefocusY == null) ? null : Math.round(state.__prefocusY);
-                        }
-                    } catch { }
-                })();
-
-                const unchanged = (key === window.__LAST_PREFOCUS_KEY__);
-                const freshMotion = (Date.now() - window.__LAST_MOTION_TS__) <= 750;
-
-                // Älä laukaise InfoBoxia passiivisella present-tickillä (joka ei seurannut oikeaa liikehdintää)
-                if (!(__isPresentTick && !freshMotion) && !(unchanged && !freshMotion)) {
-                    const resolver = () => {
-                        if (!key) return null;
-                        const groupSel = d3.selectAll("g.e")
-                            // EN: Match using the same stable key that prefocus uses (id/sourceId or label+time).
-                            .filter(d => (!!d) && (keyOf(d) === key));
-
-                        const groupNode = groupSel.node();
-                        if (!groupNode) return null;
-                        const labelNode = d3.select(groupNode).select("text.event-label").node();
-                        const targetNode = labelNode || groupNode;
-                        if (!targetNode) return null;
-
-                        // --- new guard: ensure element is still in DOM and visible ---
-                        let box = targetNode.getBoundingClientRect?.();
-                        // v47.8: if the label is fully clipped (height === 0), synthesize a small anchor box
-                        if (!box || !Number.isFinite(box.top) || box.height <= 0) {
-                            const r = svg.node().getBoundingClientRect();
-                            const cy = (state.height / 2);            // screen-space center Y in SVG coords
-                            // Build a tiny 1×1 box at the center hairline, near the card area
-                            box = {
-                                x: Math.round(r.left + r.width * 0.60),
-                                y: Math.round(r.top + cy),
-                                left: Math.round(r.left + r.width * 0.60),
-                                top: Math.round(r.top + cy),
-                                width: 1, height: 1, right: Math.round(r.left + r.width * 0.60) + 1, bottom: Math.round(r.top + cy) + 1
-                            };
-                        }
-
-                        const data = groupSel.datum?.();
-                        return (data) ? { box, data } : null;
-                    };
-
-                    try {
-                        PrefocusInfo.onPrefocus(key, resolver);
-                        window.__LAST_PREFOCUS_KEY__ = key;
-                    } catch (err) {
-                        if (window.__DBG__) console.warn('[prefocus] skipped invalid resolver', err);
-                    }
-                }
-            }
-
+            // v49: PrefocusInfo popup disabled; prefocus is visual-only via .is-prefocus
             setZOrder();
         } finally {
             __isRendering = false;

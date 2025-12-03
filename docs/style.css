@@ -265,11 +265,11 @@ g.card.active rect.cardB {
     fill-opacity: 0.82;
 }
 
-/* v35: font  better mobiilissa */
-@media (max-width: 480px) {
-    .card-group text.event-label {
-        font-size: 9px;
-    }
+text.event-label {
+    transform: translateY(var(--ty, 0px)) scaleX(var(--lens-scale, 1));
+    transform-origin: 0% 45%;
+    transition: transform .28s cubic-bezier(.22, .7, .13, 1);
+    will-change: transform;
 }
 
 .event-label {
@@ -281,6 +281,18 @@ g.card.active rect.cardB {
             /* pienempi desktopilla */
             letter-spacing: .1px;
             /* pieni luettavuus-tweak */
+}
+/* v49: background mask behind prefocus event label */
+.label-bg {
+    fill: rgba(5, 7, 11, 0.90);
+    /* tumma tausta */
+    stroke: rgba(255, 255, 255, 0.35);
+    /* kevyt ääriviiva */
+    stroke-width: 0.5px;
+    rx: 4px;
+    ry: 4px;
+    pointer-events: none;
+    /* ei blokkaa klikkejä */
 }
 
 .card-title {
@@ -410,6 +422,15 @@ svg .zoomBar .hit {
     /* keep off for now */
     /* If/when you want the pad to handle zoom-only input, switch to:
      pointer-events: all; touch-action: none; */
+}
+
+/* v49: vertical lens background band (behind cards) */
+.lens-band {
+    fill: rgba(255, 255, 255, 0.04);
+    stroke: rgba(255, 255, 255, 0.18);
+    stroke-width: 1px;
+    pointer-events: none;
+    /* purely visual, don't block clicks */
 }
 /* 
    v48.3 Prefocus Scaling Fix (Unified transform for passive + active cards)
