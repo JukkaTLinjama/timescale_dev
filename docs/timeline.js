@@ -405,7 +405,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
         // v49: align lens center & radius with the center band
         lensCfg.cy = bandTopLocal + geom.zoneH / 2;
-        lensCfg.R = geom.zoneH / 2;
+        lensCfg.R = geom.zoneH * 0.65;
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
@@ -655,12 +655,62 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             }) || matches[0];
         }
 
-        // Yksi selkeä before→after: vain chosen saa is-prefocus
+        // One clear before→after: only chosen gets: is-prefocus
         all.classed("is-prefocus", function () {
             return this === chosen;
         });
 
+        // v49: bring chosen event to front inside its card/overlay
+        if (chosen && chosen.parentNode && chosen.parentNode.appendChild) {
+            chosen.parentNode.appendChild(chosen);
+        }
+
+        // v49: update lens scale and label background for all copies
+        all.each(function (d) {
+            const g = d3.select(this);
+            const isPref = (this === chosen);
+
+            const textSel = g.select("text.event-label");
+            const bgSel = g.select("rect.label-bg");
+
+            if (!textSel.empty()) {
+                // EN: Only the focused event gets extra horizontal lens scale.
+                let lensX = 1;
+
+                if (isPref && typeof d?.time_years === "number" && state.y) {
+                    const y0 = state.y(d.time_years);
+                    const yL = lensY(y0);
+                    lensX = lensScale(yL);
+                }
+
+                textSel.style("--lens-scale", lensX);
+            }
+
+            if (!bgSel.empty()) {
+                if (isPref && !textSel.empty()) {
+                    const node = textSel.node();
+                    if (node && node.getBBox) {
+                        const bbox = node.getBBox();
+                        const padX = 6, padY = 3;
+                        bgSel
+                            .attr("x", bbox.x - padX)
+                            .attr("y", bbox.y - padY)
+                            .attr("width", bbox.width + 2 * padX)
+                            .attr("height", bbox.height + 2 * padY)
+                            .style("opacity", 1);
+                    }
+                } else {
+                    // Hide background for all non-focused events
+                    bgSel
+                        .attr("width", 0)
+                        .attr("height", 0)
+                        .style("opacity", 0);
+                }
+            }
+        });
+
         __prefocusNode = chosen;
+
         try {
             const labelNode = d3.select(chosen).select("text.event-label").node();
             const lineNode = centerZoomLine.node && centerZoomLine.node();
@@ -884,41 +934,43 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 const gg = d3.select(this);
                 const textSel = gg.select("text.event-label");
 
-                // EN: keep inline transition across merges (some browsers drop it on reparent)
+                // EN: keep inline transition across merges
                 textSel
-                    .style("transform-box", "view-box")      // keep origin stable across layers
+                    .style("transform-box", "view-box")
                     .style("transform-origin", "0% 50%")
                     .style("transition", "transform .28s cubic-bezier(.22,.7,.13,1)")
                     .style("will-change", "transform");
 
-                const yy0 = state.y(e.time_years);
-                const yy = Math.round(yy0); // v48: snap to device pixel
+                // v49: event Y goes through lensY
+                const y0 = state.y(e.time_years);
+                const yL = lensY(y0);
+                const yy = Math.round(yL);
 
-                // Keep lines at data Y (axis-aligned, no visual offset)
                 gg.select("line.event-line")
                     .attr("x1", -x + 4).attr("x2", 8)
                     .attr("y1", yy).attr("y2", yy)
                     .attr("stroke", "#aaa");
 
-                // v49: no legacy halo Y-offset; labels stay at their data Y.
                 const textOffsetY = 0;
+
+                const isPrefocus = gg.classed("is-prefocus");
+                const scaleX = isPrefocus ? lensScale(yy) : 1;
 
                 const labelSel = textSel
                     .attr("x", 12)
-                    .attr("y", yy)                       // keep baseline at integer y (no layout thrash)
-                    .style("--ty", `${textOffsetY}px`)   // kept for now; always 0px
+                    .attr("y", yy)
+                    .style("--ty", `${textOffsetY}px`)
+                    .style("--lens-scale", scaleX)
                     .text(Util.eventTitleShort(e));
 
-                // v49: show background rect only for prefocus event
                 const labelNode = labelSel.node();
                 const bgSel = gg.select("rect.label-bg");
-                const isPrefocus = gg.classed("is-prefocus");
 
                 if (labelNode && labelNode.getBBox && !bgSel.empty()) {
-                    if (isPrefocus) {
+                    const isPref = isPrefocus;
+                    if (isPref) {
                         const bbox = labelNode.getBBox();
-                        const padX = 6;
-                        const padY = 3;
+                        const padX = 6, padY = 3;
                         bgSel
                             .attr("x", bbox.x - padX)
                             .attr("y", bbox.y - padY)
@@ -926,7 +978,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                             .attr("height", bbox.height + 2 * padY)
                             .style("opacity", 1);
                     } else {
-                        // hide background for non-prefocus events
                         bgSel
                             .attr("width", 0)
                             .attr("height", 0)

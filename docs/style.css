@@ -265,13 +265,6 @@ g.card.active rect.cardB {
     fill-opacity: 0.82;
 }
 
-text.event-label {
-    transform: translateY(var(--ty, 0px)) scaleX(var(--lens-scale, 1));
-    transform-origin: 0% 45%;
-    transition: transform .28s cubic-bezier(.22, .7, .13, 1);
-    will-change: transform;
-}
-
 .event-label {
     fill: #dedede;
     /* tapahtumien tekstit */
@@ -282,6 +275,7 @@ text.event-label {
             letter-spacing: .1px;
             /* pieni luettavuus-tweak */
 }
+
 /* v49: background mask behind prefocus event label */
 .label-bg {
     fill: rgba(5, 7, 11, 0.90);
@@ -433,57 +427,40 @@ svg .zoomBar .hit {
     /* purely visual, don't block clicks */
 }
 /* 
-   v48.3 Prefocus Scaling Fix (Unified transform for passive + active cards)
-   ------------------------------------------------------------------------
-   Problem:
-   Active cards are moved to <g.active-layer>. When prefocus is applied, the
-   logic prefers the active-layer copy of the event node. If CSS uses separate
-   scaling variables (e.g. --s → scale), the browser often fails to detect a 
-   proper before→after transition when the DOM node is reparented. This causes 
-   the event label on the active card to "snap" to the larger scale instead of 
-   animating smoothly (unlike passive cards).
-
-   Fix:
-   Use ONE consistent transform path for all event labels:
-     transform: translateY(var(--ty)) scale(...)
-   The prefocus state sets the full transform (scale(1.28)) directly, not via
-   a CSS variable. This guarantees the browser always sees a simple transition 
-   from scale(1) → scale(1.28), regardless of layer changes.
-
-   Result:
-   Both passive cards and the active card animate identically. No snapping,
-   no offset jumps, no differences caused by layer reparenting.
+   v48.2 Prefocus Scaling Fix (updated for v49 lens + focus variables)
+   -------------------------------------------------------------------
+   EN:
+   We now drive both the lens stretch and the extra focus enlargement
+   via CSS variables:
+     --lens-scale   : horizontal scale from the vertical lens
+     --focus-scale  : uniform extra scale for the focused event only
+   This keeps one unified transform path for all labels and works
+   identically on passive + active cards, on both desktop and mobile.
 */
 
 text.event-label {
-    transform: translateY(var(--ty, 0px)) scale(1);
-    transform-origin: 0% 45%;
+    /* v49: lens-only horizontal scaling, no vertical scale */
+    transform: translateY(var(--ty, 0px)) scaleX(var(--lens-scale, 1));
+    transform-origin: 0% 50%;
     transition: transform .28s cubic-bezier(.22, .7, .13, 1);
     will-change: transform;
 }
 
+/* EN: Mobile uses the same transform as desktop (X-scale only). */
+@media (max-width: 800px) {
+    g.e.is-prefocus text.event-label {
+        transform: translateY(var(--ty, 0px)) scaleX(var(--lens-scale, 1));
+    }
+}
+
 g.e.is-prefocus text.event-label {
-    transform: translateY(var(--ty, 0px)) scale(1.28);
+    /* v49: no extra transform here; emphasis only comes from lensScale + styling */
     font-weight: 700;
     letter-spacing: 0.25px;
     paint-order: stroke;
     stroke: rgba(0, 0, 0, .40);
     stroke-width: .9px;
     filter: drop-shadow(0 0 3px rgba(255, 255, 255, .45));
-}
-/* v48.5: Disable prefocus scale on small screens to avoid visual jump.
-   EN: On mobile, keep only the vertical halo offset; no scale animation. */
-@media (max-width: 800px) {
-    g.e.is-prefocus text.event-label {
-        transform: translateY(var(--ty, 0px)) scale(1);
-    }
-}
-
-g.e.is-prefocus line.event-line {
-    stroke: var(--accent);
-    stroke-width: 2px;
-    opacity: .95;
-    transition: stroke-width .18s ease-out, opacity .18s ease-out;
 }
 
 /* Ensure active-layer nodes use the same transform transition.
