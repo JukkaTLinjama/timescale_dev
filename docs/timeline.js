@@ -502,17 +502,6 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
             return;
         }
 
-        // 1) Find the event whose Y is closest to the focus anchor
-        let best = null;
-        let bestDist = Infinity;
-        for (const e of candidates) {
-            const yy = state._yMap ? state._yMap.get(e) : state.y(e.time_years);
-            const d = Math.abs(yy - cy);
-            if (d < bestDist) {
-                best = e;
-                bestDist = d;
-            }
-        }
         // De-duplicate by stable key; prefer non-preview over preview
         {
             const byKey = new Map();
@@ -520,17 +509,61 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                 const k = keyOf(e);
                 if (!k) continue;
                 const prev = byKey.get(k);
-                if (!prev) { byKey.set(k, e); continue; }
-                // prefer non-preview if duplicate
-                if ((prev.theme === "preview") && (e.theme !== "preview")) byKey.set(k, e);
+                if (!prev) {
+                    byKey.set(k, e);
+                    continue;
+                }
+                // EN: prefer non-preview if duplicate
+                if ((prev.theme === "preview") && (e.theme !== "preview")) {
+                    byKey.set(k, e);
+                }
             }
             candidates = Array.from(byKey.values());
         }
 
-        if (!best) {
+        if (!candidates.length) {
             state.__prefocusKey = null;
             state.__prefocusY = null;
             return;
+        }
+
+        // 1) Find the event whose lens-mapped Y is closest to the focus anchor.
+        //    If several are effectively at the same Y (within EPS), pick one at random
+        //    → dithering, so stacked events do not always prefer the same one.
+        const EPS = 0.75;   // px: treat almost-identical lens Y as "same row"
+
+        let bestDist = Infinity;
+        let group = [];
+
+        for (const e of candidates) {
+            if (typeof e?.time_years !== "number") continue;
+            const y0 = state.y(e.time_years);
+            const yL = lensY(y0);               // lens-applied Y
+            const d = Math.abs(yL - cy);
+
+            if (d < bestDist - EPS) {
+                // clearly better than previous
+                bestDist = d;
+                group = [e];
+            } else if (Math.abs(d - bestDist) <= EPS) {
+                // effectively same Y → add to random group
+                group.push(e);
+            }
+        }
+
+        if (!group.length) {
+            state.__prefocusKey = null;
+            state.__prefocusY = null;
+            return;
+        }
+
+        // Randomly choose between equally good candidates at the same lens Y
+        let best = null;
+        if (group.length === 1) {
+            best = group[0];
+        } else {
+            const idx = Math.floor(Math.random() * group.length);
+            best = group[idx];
         }
 
         // 2) Apply distance threshold + hysteresis
@@ -692,12 +725,13 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     if (node && node.getBBox) {
                         const bbox = node.getBBox();
                         const padX = 6, padY = 3;
+                        const FOCUS_SCALE = 1.28; // match CSS g.e.is-prefocus text.event-label scale
                         bgSel
                             .attr("x", bbox.x - padX)
                             .attr("y", bbox.y - padY)
-                            .attr("width", bbox.width + 2 * padX)
+                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX)
                             .attr("height", bbox.height + 2 * padY)
-                            .style("opacity", 1);
+                            .style("opacity", 0.8);
                     }
                 } else {
                     // Hide background for all non-focused events
@@ -971,12 +1005,13 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                     if (isPref) {
                         const bbox = labelNode.getBBox();
                         const padX = 6, padY = 3;
+                        const FOCUS_SCALE = 1.28; // match CSS g.e.is-prefocus text.event-label scale
                         bgSel
                             .attr("x", bbox.x - padX)
                             .attr("y", bbox.y - padY)
-                            .attr("width", bbox.width + 2 * padX)
+                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX)
                             .attr("height", bbox.height + 2 * padY)
-                            .style("opacity", 1);
+                            .style("opacity", 0.8);
                     } else {
                         bgSel
                             .attr("width", 0)
