@@ -215,6 +215,10 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         .attr("class", "centerZoomLabel")
         .text("zoom <->");
 
+    // v49.4: keep dashed zoom line behind cards/focus, label on top
+    centerZoomPad.lower();
+    centerZoomLine.lower();
+    centerZoomText.raise();
 
     // --- apufunktiot ------------------------------------
     // --- v46.3: enforce correct layer order (cards → dim → active → axis) ---

@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49.3  </title>
+        <title>History Timeline v49.4  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49.3 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v49.4 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -72,25 +72,24 @@
         <svg id="timeline"></svg>
     </div>
 
-    <!-- TEMP v49-lens: inline event editor disabled while testing lens
         <div id="event-editor" hidden>
-            <div class="editor-header">
-                <div class="editor-title">Edit event</div>
-                <button id="close-editor" title="Close editor">×</button>
-            </div>
-            <div class="editor-body">
-                <label>Title</label>
-                <input id="edit-title" type="text">
-    
-                <label>Year</label>
-                <input id="edit-year" type="text">
-    
-                <label>Description</label>
-                <textarea id="edit-desc" rows="4"></textarea>
-    
-                <label>Theme</label>
-                <input id="edit-theme" type="text">
-                <!-- v46.4+: meta & link fields -->
+        <div class="editor-header">
+            <div class="editor-title">Edit event</div>
+            <button id="close-editor" title="Close editor">×</button>
+        </div>
+        <div class="editor-body">
+            <label>Title</label>
+            <input id="edit-title" type="text">
+
+            <label>Year</label>
+            <input id="edit-year" type="text">
+
+            <label>Description</label>
+            <textarea id="edit-desc" rows="4"></textarea>
+
+            <label>Theme</label>
+            <input id="edit-theme" type="text">
+            <!-- v46.4+: meta & link fields -->
     <label>ID</label>
     <input id="edit-id" type="text" readonly>
     
@@ -314,7 +313,8 @@
                 const SENS_TOUCH = -0.006;   // zoom sensitivity for touch
                 const SENS_MOUSE = -0.003;   // zoom sensitivity for mouse
                 const STEP = 20;             // max delta per frame (zoom)
-                const PAN_STEP = 10;         // max delta per frame (vertical pan) → slower scroll
+                const PAN_STEP = 10;         // normal max delta per frame (vertical pan)
+                const PAN_STEP_FINE = 3;     // max delta per frame when panning inside center band
                 const CLAMP_MIN = 0.95;      // minimal scale per step
                 const CLAMP_MAX = 1.05;      // maximal scale per step
 
@@ -392,20 +392,18 @@
 
                     // --- pan mode ---
                     if (mode === 'pan') {
-                        // EN: non-linear pan
-                        // - very small finger moves → extra-slow scroll
-                        // - larger swipes → closer to linear speed
+                        // EN: piecewise speed
+                        //  - gesture that started in the center zone and is still there → very slow pan
+                        //  - otherwise → normal pan
                         const dyRaw = e.clientY - lastY;
                         const absRaw = Math.abs(dyRaw);
 
                         if (absRaw >= DEAD) {
-                            const STEP_MAX = STEP; // reference scale (same as zoom step)
-                            const norm = Math.min(1, absRaw / STEP_MAX);   // 0…1
-                            const scale = 0.12 + 0.88 * norm;             // 0.12…1.0
-                            let dyStep = Math.sign(dyRaw) * absRaw * scale;
+                            const stepMax = (startInCenter && inCenterZone(e.clientY))
+                                ? PAN_STEP_FINE   // inside lens/center band → slow
+                                : PAN_STEP;       // outside → normal
 
-                            // final clamp for safety
-                            dyStep = Math.max(-STEP_MAX, Math.min(STEP_MAX, dyStep));
+                            const dyStep = Math.max(-stepMax, Math.min(stepMax, dyRaw));
 
                             lastY = e.clientY;
                             svgSel.call(zoomBehavior.translateBy, 0, dyStep);
@@ -509,7 +507,7 @@
              */
             function compute(w, h, axisRight, zoomBarLeft) {
                 // Vertical band in the middle of the screen (used as "zoom allowed" zone)
-                const zoneH = Math.max(80, Math.min(h * 0.36, 160)); // clamp 80–160 px
+                const zoneH = Math.max(70, Math.min(h * 0.26, 120)); // slightly narrower band, clamp 70–120 px
                 const zoneY = (h - zoneH) / 2;
                 const midY = Math.round(h / 2);
 
@@ -1186,9 +1184,7 @@
 </script>
 
 <!-- modules in files -->
-
-<!-- TEMP: editor disabled for lens test -->
-<!-- <script src="editor.js"></script> -->
+ <script src="editor.js"></script>
 
 <script src="timeline.js"></script>
 </body>
