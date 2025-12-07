@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49.4  </title>
+        <title>History Timeline v49.41  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49.4 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v49.41 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -313,8 +313,8 @@
                 const SENS_TOUCH = -0.006;   // zoom sensitivity for touch
                 const SENS_MOUSE = -0.003;   // zoom sensitivity for mouse
                 const STEP = 20;             // max delta per frame (zoom)
-                const PAN_STEP = 10;         // normal max delta per frame (vertical pan)
-                const PAN_STEP_FINE = 3;     // max delta per frame when panning inside center band
+                const PAN_STEP = 20;         // normal max delta per frame (vertical pan)
+                const PAN_STEP_FINE = 1;     // max delta per frame *inside lens band*
                 const CLAMP_MIN = 0.95;      // minimal scale per step
                 const CLAMP_MAX = 1.05;      // maximal scale per step
 
@@ -324,16 +324,27 @@
                 let startX = 0, startY = 0, lastX = 0, lastY = 0;
                 let startInCenter = false;     // did gesture start in center zone?
 
-                // --- helper: check if pointer Y is within the central zoom zone ---
-                function inCenterZone(y) {
-                    const H = innerHeight();
-                    const zoneH = Math.max(80, Math.min(H * 0.36, 160)); // 80–160px or ~1/3 screen
-                    const y0 = (H - zoneH) / 2, y1 = y0 + zoneH;
-                    return y >= y0 && y <= y1;
+                // --- helper: check if pointer Y (page coords) is within the center band of the SVG ---
+                function inCenterZone(pageY) {
+                    const svgNode = svgSel.node();
+                    if (!svgNode) return false;
+
+                    const r = svgNode.getBoundingClientRect();
+                    const H = r.height || innerHeight();
+
+                    const zoneH = Math.max(80, Math.min(H * 0.36, 160)); // 80–160 px
+
+                    // v49.5: shift band slightly downward inside SVG (bias zoom area below mid)
+                    const DOWN_BIAS = H * 0.02; // ~8 % of SVG height
+                    const y0 = r.top + (H - zoneH) / 2 + DOWN_BIAS;
+                    const y1 = y0 + zoneH;
+
+                    return pageY >= y0 && pageY <= y1;
                 }
 
                 const isTouch = (e) => e.pointerType === 'touch';
                 const svgNode = svgSel.node();
+
                 const contEl = document.getElementById('timeline-container');
 
                 // --- visual feedback class toggle ---
@@ -392,19 +403,16 @@
 
                     // --- pan mode ---
                     if (mode === 'pan') {
-                        // EN: piecewise speed
-                        //  - gesture that started in the center zone and is still there → very slow pan
-                        //  - otherwise → normal pan
                         const dyRaw = e.clientY - lastY;
                         const absRaw = Math.abs(dyRaw);
 
                         if (absRaw >= DEAD) {
-                            const stepMax = (startInCenter && inCenterZone(e.clientY))
-                                ? PAN_STEP_FINE   // inside lens/center band → slow
-                                : PAN_STEP;       // outside → normal
-
-                            const dyStep = Math.max(-stepMax, Math.min(stepMax, dyRaw));
-
+                            // If pointer is inside the lens band → use fine step, otherwise normal
+                            const maxStep = inCenterZone(e.clientY) ? PAN_STEP_FINE : PAN_STEP;
+                            const dyStep = Math.max(-maxStep, Math.min(maxStep, dyRaw));
+                            if (inCenterZone(e.clientY)) {
+                                dyStep *= 0.2; // extra slow factor in lens
+                            }
                             lastY = e.clientY;
                             svgSel.call(zoomBehavior.translateBy, 0, dyStep);
                         }

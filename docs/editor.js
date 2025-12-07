@@ -1177,6 +1177,7 @@
   let infoEl = null;
   let __lastUserIntentTs = 0;
   const __USER_INTENT_WINDOW_MS = 1200;
+  let __lastShowTs = 0;        // v49.5: when  InfoBox became visible
 
   ['pointerdown', 'wheel', 'keydown', 'touchstart'].forEach((type) => {
     window.addEventListener(type, (e) => { if (e && e.isTrusted) { __lastUserIntentTs = performance.now(); } }, { capture: true, passive: true });
@@ -1232,42 +1233,50 @@
       </div>`;
     }
 
-  function show(ev, screenBox) {
-    __lastUserIntentTs = 0;
-    const el = ensureInfoEl();
-    el.innerHTML = buildEventHTML(ev);
-    const btn = el.querySelector('.edit-event');
-    if (btn) {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent('timeline:edit-event', { detail: { event: ev } }));
-      });
+    function show(ev, screenBox) {
+        __lastUserIntentTs = 0;
+        const el = ensureInfoEl();
+        el.innerHTML = buildEventHTML(ev);
+        const btn = el.querySelector('.edit-event');
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.dispatchEvent(new CustomEvent('timeline:edit-event', { detail: { event: ev } }));
+            });
+        }
+        el.classList.remove('is-visible');
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px) scale(0.98)';
+        requestAnimationFrame(() => {
+            const rect = el.getBoundingClientRect();
+            const M = infoCfg.margin;
+            let x = Math.round(screenBox.left + 12);
+            let y = Math.round(screenBox.top - rect.height - 8);
+            if (y < M) y = Math.round(screenBox.bottom + 8);
+            if (x + rect.width + M > innerWidth) x = Math.max(M, innerWidth - rect.width - M);
+            if (y + rect.height + M > innerHeight) y = Math.max(M, innerHeight - rect.height - M);
+            el.style.left = `${x}px`; el.style.top = `${y}px`;
+            requestAnimationFrame(() => {
+                __lastShowTs = performance.now(); // arm hide only after box is visible
+                el.style.visibility = '';
+                el.style.opacity = '';
+                el.style.transform = '';
+                el.classList.add('is-visible');
+            });
+        });
     }
-    el.classList.remove('is-visible');
-    el.style.visibility = 'hidden';
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(6px) scale(0.98)';
-    requestAnimationFrame(() => {
-      const rect = el.getBoundingClientRect();
-      const M = infoCfg.margin;
-      let x = Math.round(screenBox.left + 12);
-      let y = Math.round(screenBox.top - rect.height - 8);
-      if (y < M) y = Math.round(screenBox.bottom + 8);
-      if (x + rect.width + M > innerWidth) x = Math.max(M, innerWidth - rect.width - M);
-      if (y + rect.height + M > innerHeight) y = Math.max(M, innerHeight - rect.height - M);
-      el.style.left = `${x}px`; el.style.top = `${y}px`;
-      requestAnimationFrame(() => {
-        el.style.visibility = ''; el.style.opacity = ''; el.style.transform = ''; el.classList.add('is-visible');
-      });
-    });
-  }
 
-  function hide() {
-    const now = performance.now();
-    const userAllowed = (now - __lastUserIntentTs) <= __USER_INTENT_WINDOW_MS;
-    if (!userAllowed) return; // avoid hiding during programmatic redraws
-    ensureInfoEl().classList.remove('is-visible');
-  }
+    function hide() {
+        const now = performance.now();
+
+        // v49.5: do not hide immediately after show (same tap sequence)
+        if (now - __lastShowTs < 250) return;
+
+        const userAllowed = (now - __lastUserIntentTs) <= __USER_INTENT_WINDOW_MS;
+        if (!userAllowed) return; // avoid hiding during programmatic redraws
+        ensureInfoEl().classList.remove('is-visible');
+    }
 
   document.addEventListener('click', hide);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
