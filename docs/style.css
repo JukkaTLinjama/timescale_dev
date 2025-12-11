@@ -418,9 +418,33 @@ svg .zoomBar .hit {
      pointer-events: all; touch-action: none; */
 }
 
+/* v49.43: small info button near lens center line */
+.lensInfoButton {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.45s ease-in-out;
+}
+
+.lensInfoButton.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.lensInfoBg {
+    fill: rgba(23, 23, 23, 0.7);
+    stroke: rgba(132, 131, 131, 0.85);
+    stroke-width: 1;
+}
+
+.lensInfoIcon {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 12px;
+    fill: #bababa;
+}
+
 /* v49: vertical lens background band (behind cards) */
 .lens-band {
-    fill: rgba(255, 255, 255, 0.04);
+    fill: rgba(255, 255, 255, 0.069);
     stroke: rgba(255, 255, 255, 0.18);
     stroke-width: 1px;
     pointer-events: none;

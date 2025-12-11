@@ -214,6 +214,30 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
     const centerZoomText = svg.append("text")
         .attr("class", "centerZoomLabel")
         .text("zoom <->");
+    // v49.5: explicit info button to open InfoBox for current prefocus event
+    const centerInfoGroup = svg.append("g")
+        .attr("class", "lensInfoButton")
+        .style("cursor", "pointer");
+
+    const centerInfoBg = centerInfoGroup.append("rect")
+        .attr("class", "lensInfoBg")
+        .attr("rx", 6)
+        .attr("ry", 6);
+
+    const centerInfoIcon = centerInfoGroup.append("text")
+        .attr("class", "lensInfoIcon")
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "central")
+        .text("i");
+
+    centerInfoGroup.on("click touchstart", function (event) {
+        // EN: Manual “info” trigger: show InfoBox for current prefocus event.
+        if (event && event.preventDefault) event.preventDefault();
+        if (event && event.stopPropagation) event.stopPropagation();
+        if (typeof showPrefocusInfoFromLens === "function") {
+            showPrefocusInfoFromLens();
+        }
+    });
 
     // v49.4: keep dashed zoom line behind cards/focus, label on top
     centerZoomPad.lower();
@@ -410,6 +434,27 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         // v49: align lens center & radius with the center band
         lensCfg.cy = bandTopLocal + geom.zoneH / 2;
         lensCfg.R = geom.zoneH * 0.65;
+
+        // v49.43: position lens info button at top-right corner of the lens band
+        if (centerInfoGroup && centerInfoBg && centerInfoIcon) {
+            const btnMarginX = 8;
+            const btnMarginY = 23;
+
+            const btnX = geom.xRight - btnMarginX;
+            const btnY = geom.zoneY + btnMarginY;
+            centerInfoGroup.attr("transform", `translate(${btnX},${btnY})`);
+
+            const size = 28;
+            centerInfoBg
+                .attr("x", -size / 2)
+                .attr("y", -size / 2)
+                .attr("width", size)
+                .attr("height", size);
+
+            centerInfoIcon
+                .attr("x", 0)
+                .attr("y", 0);
+        }
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
@@ -733,7 +778,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         bgSel
                             .attr("x", bbox.x - padX)
                             .attr("y", bbox.y - padY)
-                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX)
+                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX + 10)
                             .attr("height", bbox.height + 2 * padY)
                             .style("opacity", 0.8);
                     }
@@ -749,6 +794,11 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 
         __prefocusNode = chosen;
 
+        // v49.43: show lens info button only when there is an active prefocus event
+        if (centerInfoGroup) {
+            centerInfoGroup.classed("is-visible", !!chosen);
+        }
+
         try {
             const labelNode = d3.select(chosen).select("text.event-label").node();
             const lineNode = centerZoomLine.node && centerZoomLine.node();
@@ -761,7 +811,67 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
         } catch (e) {
             console.warn("[DBG screen] failed", e);
         }
+    }
+    // v49.43: explicit InfoBox opener for the current prefocus event
+    function showPrefocusInfoFromLens() {
+        if (!window.InfoBox || typeof InfoBox.show !== "function") return;
 
+        let node = __prefocusNode;
+        let ev = null;
+
+        // 1) Prefer current prefocus event if available
+        if (node) {
+            ev = d3.select(node).datum();
+        }
+
+        // 2) If no prefocus, pick the event whose lens-mapped Y is closest to lens center
+        if (!ev) {
+            if (!state || !state.y || !lensCfg || !isFinite(lensCfg.cy)) return;
+
+            const cy = lensCfg.cy;
+            let bestNode = null;
+            let bestEv = null;
+            let bestDist = Infinity;
+
+            svg.selectAll("g.e").each(function (d) {
+                if (!d || typeof d.time_years !== "number") return;
+                const y0 = state.y(d.time_years);
+                if (!isFinite(y0)) return;
+                const yL = lensY(y0);
+                const dist = Math.abs(yL - cy);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestNode = this;
+                    bestEv = d;
+                }
+            });
+
+            if (!bestNode || !bestEv) return;
+            node = bestNode;
+            ev = bestEv;
+        }
+
+        if (!node || !ev) return;
+
+        // Prefer the label text as visual anchor
+        let anchor = d3.select(node).select("text.event-label").node();
+        if (!anchor || !anchor.getBoundingClientRect) {
+            anchor = node;
+        }
+        if (!anchor || !anchor.getBoundingClientRect) return;
+
+        const box = anchor.getBoundingClientRect();
+
+        try {
+            InfoBox.show(ev, box);
+        } catch (err) {
+            if (DBG) console.warn("[lens-info] InfoBox.show failed", err);
+        }
+    }
+
+    // optional: expose for debugging in console
+    if (typeof window !== "undefined") {
+        window.showPrefocusInfoFromLens = showPrefocusInfoFromLens;
     }
 
     // --- Safe wrapper: requestPrefocusUpdate() ---
@@ -1013,7 +1123,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
                         bgSel
                             .attr("x", bbox.x - padX)
                             .attr("y", bbox.y - padY)
-                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX)
+                            .attr("width", bbox.width * FOCUS_SCALE + 2 * padX + 10)
                             .attr("height", bbox.height + 2 * padY)
                             .style("opacity", 0.8);
                     } else {
