@@ -20,7 +20,7 @@ const timed = U.timed || ((label, fn) => (typeof fn === "function" ? fn() : unde
 const Util = window.Util || (window.Util = {});
 
 // TODO v45.5: duplicate definition — cardMetrics now lives in index_.html Util.
-// Keep temporarily for safety until verified on all browsers.
+// Legacy fallback -- Keep temporarily for safety until verified on all browsers.
 if (typeof Util.cardMetrics !== "function") {
     Util.cardMetrics = function (titleSel, groupSel, yTopEv, yBotEv, viewH) {
         const titleH = 10;
@@ -44,7 +44,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
 (() => {
     const cfg = (window.TS_CFG || {});
     // Disable built-in info toggle; handled externally in index.html
-    const DISABLE_INTERNAL_INFO_TOGGLE = true;
+    // const DISABLE_INTERNAL_INFO_TOGGLE = true;
     const ACTIVATE_DELAY = (window.TS_DELAY && TS_DELAY.ACTIVATE) || 1000;
     const ZOOM_DELAY = (window.TS_DELAY && TS_DELAY.ZOOM) || 1500;
 
@@ -458,7 +458,7 @@ let __prefocusNode = null; // EN: last chosen DOM node for is-prefocus (for smoo
     }
 
     // v42: continuous prefocus for the nearest-to-center EVENT label
-    let prefocusRaf = null;
+    // let prefocusRaf = null;
     // Stable key for data-join and prefocus matching.
     // Prefer persistent ids; fallback to label+time (old behavior).
     const keyOf = (e) => (e && (e.id ?? e.sourceId ?? (e.label + e.time_years)));

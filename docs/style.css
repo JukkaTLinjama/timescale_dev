@@ -602,6 +602,58 @@ g.active-layer text.event-label {
     margin-bottom: 8px;
 }
 
+/* Dev-only UI: show only when editor controls are open OR debug is on */
+.dev-only {
+    display: none;
+}
+
+body.editor-controls-open .dev-only {
+    display: block;
+}
+
+body.debug-on .dev-only {
+    display: block;
+}
+
+/* Mobile: stack editor header + actions to avoid overlap */
+@media (max-width: 700px) {
+    #event-editor .editor-header {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    /* Title always on its own row */
+    #event-editor .editor-title {
+        flex: 1 1 100%;
+        margin-right: 24px;
+        /* small breathing room */
+    }
+
+    /* Close button stays in top-right corner */
+    #event-editor #close-editor {
+        order: 2;
+        margin-left: auto;
+    }
+
+    /* Actions row goes below title/close and can wrap */
+    #event-editor .editor-actions {
+        order: 3;
+        width: 100%;
+        margin-top: 4px !important;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    /* Make buttons smaller and allow two per row */
+    #event-editor .editor-actions button {
+        flex: 1 1 calc(50% - 4px);
+        font-size: 11px !important;
+        padding: 4px 4px !important;
+    }
+}
+
 #event-editor .editor-title {
     font-weight: 600;
     color: #ffd399;

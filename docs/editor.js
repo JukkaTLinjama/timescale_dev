@@ -556,146 +556,66 @@
 
     // Floating editor controls (toggleable bottom tray)
     document.addEventListener('DOMContentLoaded', () => {
-        
-        // EN: Avoid duplicates if already created
-        if (document.getElementById('editor-controls-toggle') || document.getElementById('editor-controls')) return;
+        // Reuse existing nodes if they already exist (e.g. toggle placed inside Help panel)
+        let toggle = document.getElementById('editor-controls-toggle');
+        let tray = document.getElementById('editor-controls');
 
-        // --- (1) Toggle button in bottom-right corner ---
-        const toggle = document.createElement('button');
-        toggle.id = 'editor-controls-toggle';
-        toggle.textContent = 'Show editor controls';
-        toggle.setAttribute('aria-expanded', 'false');
-        toggle.style.cssText = [
-            'position:fixed; right:10px; bottom:26px; z-index:2500;',
-            'font:12px system-ui; padding:6px 10px; border-radius:8px;',
-            'border:1px solid #777; background:#2b2b2b; color:#eee; cursor:pointer;'
-        ].join('');
+        // --- (1) Toggle button (reuse or create) ---
+        if (!toggle) {
+            toggle = document.createElement('button');
+            toggle.id = 'editor-controls-toggle';
+            toggle.textContent = 'Show editor controls';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.style.cssText =
+                'font:12px system-ui; padding:6px 10px; border-radius:8px; border:1px solid #777; background:#2b2b2b; color:#eee; cursor:pointer;';
+        }
 
-        // --- (2) Bottom tray that holds ALL controls (initially hidden) ---
-        const tray = document.createElement('div');
-        tray.id = 'editor-controls';
-        tray.style.cssText = [
-            'position:fixed; left:10px; right:10px; bottom:26px; z-index:2400;',
-            'display:none; gap:8px; flex-wrap:wrap;',
-            'background:rgba(30,30,30,.92); border:1px solid #555; padding:8px 10px; border-radius:10px;',
-            'box-shadow:0 6px 18px rgba(0,0,0,.35);',
-            'font:12px/1 system-ui; color:#ddd;'
-        ].join('');
-        tray.setAttribute('role', 'region');
-        tray.setAttribute('aria-label', 'Editor controls');
+        // --- (2) Tray (reuse or create) ---
+        if (!tray) {
+            tray = document.createElement('div');
+            tray.id = 'editor-controls';
+            tray.setAttribute('role', 'region');
+            tray.setAttribute('aria-label', 'Editor controls');
+            tray.style.cssText = [
+                'position:fixed; left:10px; right:10px; bottom:26px; z-index:2400;',
+                'display:none; gap:8px; flex-wrap:wrap;',
+                'background:rgba(30,30,30,.92); border:1px solid #555; padding:8px 10px; border-radius:10px;',
+                'box-shadow:0 6px 18px rgba(0,0,0,.35);',
+                'font:12px/1 system-ui; color:#ddd;'
+            ].join('');
+        }
 
-        // Helper for consistent buttons
-        const mkBtn = (txt, fn, title = '') => {
-            const b = document.createElement('button');
-            b.textContent = txt;
-            if (title) b.title = title;
-            b.style.cssText = 'font:12px system-ui; padding:6px 10px; border-radius:8px; border:1px solid #777; background:#3a3a3a; color:#eee; cursor:pointer;';
-            b.onclick = fn;
-            return b;
-        };
-
-        // --- (3) Controls inside the tray ---
-        
-        // Clear all preview drafts
-        tray.appendChild(mkBtn('Clear drafts', () => {
-            if (!window.PreviewData?.clear) return showToast('PreviewData not ready');
-            if (confirm('Clear all preview drafts?')) {
-                PreviewData.clear();
-                window.rerenderTimeline?.();
-                showToast('Cleared all preview drafts');
-            }
-        }, 'Delete all drafts from the Preview card'));
-
-        // Export drafts (preview only)
-        tray.appendChild(mkBtn('Export drafts', () => {
-            if (!window.PreviewData?.get) return showToast('PreviewData not ready');
-            const drafts = PreviewData.get();
-            const blob = new Blob([JSON.stringify(drafts, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = Object.assign(document.createElement('a'), { href: url, download: 'preview_drafts.json' });
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }, 'Download all preview drafts as JSON'));
-
-        // Accept & export (base + converted drafts)
-        tray.appendChild(mkBtn('Accept & export', () => {
-            if (!window.ExportOps?.buildExportJSON) return showToast('ExportOps not ready');
-            const basePack = window.__BASE_EVENTSDB || window.TS_DATA || {};
-            const pack = ExportOps.buildExportJSON(basePack);
-            const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = Object.assign(document.createElement('a'), { href: url, download: 'eventsDB_with_preview_finals.json' });
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }, 'Download merged eventsDB (base + preview drafts converted to finals)'));
-
-        // --- (4) Toggle behavior ---
-        let __controlsOpen = false; // EN: remember tray state across renders
-        let __previewCard = null;   // EN: cache the <g.card> whose title is "preview"
+        // --- (3) Toggle behavior ---
+        let __controlsOpen = false;
+        let __previewCard = null;
 
         function setOpen(open) {
             __controlsOpen = !!open;
-
-            // Toggle tray UI
-            tray.style.display = open ? 'flex' : 'none';
-            toggle.textContent = open ? 'Hide editor controls' : 'Show editor controls';
-            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-
-            // When opening, optionally select the "preview" theme (harmless if already active)
-            if (open && window.TimelineAPI?.selectTheme) {
-                try { TimelineAPI.selectTheme('preview'); } catch (_) { }
-            }
-
-            // Locate the preview card once (and revalidate if DOM changed)
-            // EN: Use data-theme="preview" instead of title text for robustness.
-            if (!__previewCard || !document.contains(__previewCard)) {
-                const svg = document.getElementById('timeline');
-                __previewCard = svg
-                    ? svg.querySelector('g.card[data-theme="preview"]')
-                    : null;
-            }
-
-            // Show/hide the entire preview card group if present
-            if (__previewCard) {
-                if (open) {
-                    __previewCard.style.display = '';
-                    __previewCard.removeAttribute('data-hidden-by-controls');
-                } else {
-                    __previewCard.style.display = 'none';
-                    __previewCard.setAttribute('data-hidden-by-controls', '1');
-                }
-            }
-
+            tray.style.display = __controlsOpen ? 'flex' : 'none';
         }
 
-        toggle.addEventListener('click', () => setOpen(!__controlsOpen));
-        // EN: Keep preview hidden at startup and after any redraws, unless the tray is open.
-        document.addEventListener('timeline:first-render', () => {
-            if (!__controlsOpen) {
-                // wait a tick to run after DOM has the cards
-                requestAnimationFrame(() => setOpen(false));
-            }
-        });
+        // --- Toggle behavior (simple + robust) ---
+        // Stop the help overlay from handling the click, but do not preventDefault here.
+        toggle.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        }, true); // capture
 
-        // Some builds emit only generic "timeline:render" (or many times).
-        document.addEventListener('timeline:render', () => {
-            requestAnimationFrame(() => setOpen(__controlsOpen));
-        });
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(!__controlsOpen);
+        }, true); // capture
 
-        // --- (5) Mount to DOM ---
-        document.body.appendChild(toggle);
-        document.body.appendChild(tray);
+        // --- (4) Mount: toggle into help box, tray into body ---
+        const helpBox = document.getElementById('help-box') || document.getElementById('info-box');
+        // Make the toggle behave like a normal button inside help
+        toggle.style.position = 'static';
+        toggle.style.marginTop = '10px';
+        toggle.style.width = '100%';
 
-        // Optional: close tray on Escape for quick keyboard control
-        document.addEventListener('keydown', (e) => {
-            if (e.key !== 'Escape') return;
-            // If editor is open, let the editor's ESC handler take precedence.
-            if (window.__editorOpen) return;
-            // Otherwise, close the tray if it's open.
-            if (__controlsOpen) setOpen(false);
-        });
+        if (helpBox && !helpBox.contains(toggle)) helpBox.appendChild(toggle);
+        if (!document.body.contains(tray)) document.body.appendChild(tray);
 
-        // Start collapsed by default
+        // Start closed
         setOpen(false);
     });
 

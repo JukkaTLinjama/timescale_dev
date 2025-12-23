@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49.43  </title>
+        <title>History Timeline v49.6  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49.43 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v49.6 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -51,9 +51,9 @@
     </div>
 
     <!-- status päivittyy skriptistä -->
-    <div id="status-message" style="font-size:0.75em; color:#666; margin-top:2px;">
-        Loading…
-    </div>
+<div id="status-message" class="dev-only" style="font-size:0.75em; color:#666; margin-top:2px; display:none;">
+    <!-- hidden by default -->
+</div>
 
     <!-- erillinen author-kenttä, EI muutu skriptissä -->
     <div id="author" style="font-size:0.75em; color:#666; margin-top:6px;">
@@ -128,6 +128,7 @@
     <script>
         // Debug switch via ?debug=1
         (function () {
+            document.documentElement.classList.add('debug-on');
             const u = new URL(location.href);
             const dbg = u.searchParams.get("debug") === "1";
             // näkyvä pieni virhepalkki vain debug-tilassa
@@ -1127,10 +1128,18 @@
             e.stopPropagation();
             setHelp(!helpActive);
         });
+        
+        // Allow clicks on interactive elements inside the help panel (e.g. editor-controls-toggle)
+        function allowInteractiveInPanel(e) {
+            const t = e.target;
+            if (t && (t.closest('button') || t.closest('a') || t.closest('input') || t.closest('select') || t.closest('textarea'))) {
+                return; // let the event reach the control
+            }
+            e.stopPropagation(); // block "outside click" logic
+        }
 
-        // Do NOT close when interacting inside the panel
-        panel.addEventListener("click", (e) => e.stopPropagation(), { capture: true });
-        panel.addEventListener("pointerdown", (e) => e.stopPropagation(), { capture: true });
+        panel.addEventListener("click", allowInteractiveInPanel, { capture: true });
+        panel.addEventListener("pointerdown", allowInteractiveInPanel, { capture: true });
 
         // Close on ESC from anywhere
         document.addEventListener("keydown", (e) => {
@@ -1195,8 +1204,8 @@
 
 <!-- modules in files -->
  <script src="editor.js"></script>
-
 <script src="timeline.js"></script>
+
 </body>
 
 </html>
