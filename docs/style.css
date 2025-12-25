@@ -99,6 +99,24 @@ body {
     font-weight: 400;
 }
 
+/* EN: InfoBox section helpers (Editor tools will live here). */
+#info-box .info-sep {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 8px 0;
+}
+
+#info-box .info-section-title {
+    font: 600 11px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color: #ffd399;
+    margin-bottom: 6px;
+}
+
+#info-box .info-section-body {
+    font-size: 11px;
+    color: #cfcfcf;
+}
+
 /* v38: info-box linkkien värit tummalla taustalla, hyvä kontrasti */
 #info-box a {
     color: #89723b;

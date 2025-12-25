@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49.6  </title>
+        <title>History Timeline v49.7  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49.6 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v49.7 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -47,6 +47,14 @@
         <!-- pikavinkit -->
     <p><em>Tips:</em> Pinch/scroll content or swipe L/R to zoom · Click a theme card to focus · Double-tap or long-press an
         event for notes</p>
+    <hr class="info-sep">
+
+    <div id="editor-tools" class="info-section">
+        <div class="info-section-title">Editor tools</div>
+        <div class="info-section-body">
+            <em>(placeholder)</em>
+        </div>
+    </div>
 
     </div>
 
@@ -1128,7 +1136,7 @@
             e.stopPropagation();
             setHelp(!helpActive);
         });
-        
+
         // Allow clicks on interactive elements inside the help panel (e.g. editor-controls-toggle)
         function allowInteractiveInPanel(e) {
             const t = e.target;

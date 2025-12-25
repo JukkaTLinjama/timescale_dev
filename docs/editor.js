@@ -553,71 +553,7 @@
       if (ev) openEditor(ev);
     });
   }
-
-    // Floating editor controls (toggleable bottom tray)
-    document.addEventListener('DOMContentLoaded', () => {
-        // Reuse existing nodes if they already exist (e.g. toggle placed inside Help panel)
-        let toggle = document.getElementById('editor-controls-toggle');
-        let tray = document.getElementById('editor-controls');
-
-        // --- (1) Toggle button (reuse or create) ---
-        if (!toggle) {
-            toggle = document.createElement('button');
-            toggle.id = 'editor-controls-toggle';
-            toggle.textContent = 'Show editor controls';
-            toggle.setAttribute('aria-expanded', 'false');
-            toggle.style.cssText =
-                'font:12px system-ui; padding:6px 10px; border-radius:8px; border:1px solid #777; background:#2b2b2b; color:#eee; cursor:pointer;';
-        }
-
-        // --- (2) Tray (reuse or create) ---
-        if (!tray) {
-            tray = document.createElement('div');
-            tray.id = 'editor-controls';
-            tray.setAttribute('role', 'region');
-            tray.setAttribute('aria-label', 'Editor controls');
-            tray.style.cssText = [
-                'position:fixed; left:10px; right:10px; bottom:26px; z-index:2400;',
-                'display:none; gap:8px; flex-wrap:wrap;',
-                'background:rgba(30,30,30,.92); border:1px solid #555; padding:8px 10px; border-radius:10px;',
-                'box-shadow:0 6px 18px rgba(0,0,0,.35);',
-                'font:12px/1 system-ui; color:#ddd;'
-            ].join('');
-        }
-
-        // --- (3) Toggle behavior ---
-        let __controlsOpen = false;
-        let __previewCard = null;
-
-        function setOpen(open) {
-            __controlsOpen = !!open;
-            tray.style.display = __controlsOpen ? 'flex' : 'none';
-        }
-
-        // --- Toggle behavior (simple + robust) ---
-        // Stop the help overlay from handling the click, but do not preventDefault here.
-        toggle.addEventListener('pointerdown', (e) => {
-            e.stopPropagation();
-        }, true); // capture
-
-        toggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setOpen(!__controlsOpen);
-        }, true); // capture
-
-        // --- (4) Mount: toggle into help box, tray into body ---
-        const helpBox = document.getElementById('help-box') || document.getElementById('info-box');
-        // Make the toggle behave like a normal button inside help
-        toggle.style.position = 'static';
-        toggle.style.marginTop = '10px';
-        toggle.style.width = '100%';
-
-        if (helpBox && !helpBox.contains(toggle)) helpBox.appendChild(toggle);
-        if (!document.body.contains(tray)) document.body.appendChild(tray);
-
-        // Start closed
-        setOpen(false);
-    });
+    // Legacy bottom tray editor UI removed; editor tools will be hosted in InfoBox.
 
 })();
 
