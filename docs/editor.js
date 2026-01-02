@@ -51,6 +51,102 @@
     }
 })();
 
+// --- InfoBox: mount Editor tools into the "?" panel ---------------------------
+// EN: This replaces the old bottom tray UX. The tools live inside #info-box.
+(function () {
+    function mountEditorTools() {
+        const host = document.querySelector('#editor-tools .info-section-body');
+        if (!host) return;
+
+        // EN: Avoid double-mounting.
+        if (host.dataset.mounted === '1') return;
+        host.dataset.mounted = '1';
+
+        // Replace placeholder
+        host.innerHTML = '';
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;';
+
+        const mkBtn = (label, title, onClick) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            if (title) b.title = title;
+            b.style.cssText = 'font:600 11px system-ui;padding:6px 8px;border-radius:8px;border:1px solid #666;background:#2a2a2a;color:#ffd399;cursor:pointer;';
+            b.addEventListener('click', onClick);
+            return b;
+        };
+
+        // (1) Toggle "editor controls" mode (dev-only UI + future toggles)
+        wrap.appendChild(mkBtn(
+            'Show editor controls',
+            'Toggle editor tools visibility (dev-only)',
+            () => {
+                const on = document.body.classList.toggle('editor-controls-open');
+                if (wrap.__toggleBtn) wrap.__toggleBtn.textContent = on ? 'Hide editor controls' : 'Show editor controls';
+                if (window.showToast) window.showToast(on ? 'Editor controls: ON' : 'Editor controls: OFF', 1400);
+            }
+        ));
+
+        // Keep a reference so we can update label text
+        wrap.__toggleBtn = wrap.querySelector('button');
+
+        // (2) Clear preview drafts (dev-only)
+        const clearBtn = mkBtn(
+            'Clear drafts',
+            'Delete all Preview drafts',
+            () => {
+                if (!window.PreviewData || !PreviewData.clear) {
+                    if (window.showToast) window.showToast('PreviewData not ready', 1600);
+                    return;
+                }
+                if (confirm('Clear all preview drafts?')) {
+                    PreviewData.clear();
+                    if (window.rerenderTimeline) window.rerenderTimeline();
+                    if (window.showToast) window.showToast('Cleared all preview drafts', 1600);
+                }
+            }
+        );
+        clearBtn.classList.add('dev-only');
+        wrap.appendChild(clearBtn);
+
+        // (3) Export preview drafts (dev-only)
+        const exportBtn = mkBtn(
+            'Export drafts',
+            'Download Preview drafts as JSON',
+            () => {
+                if (!window.PreviewData || !PreviewData.get) {
+                    if (window.showToast) window.showToast('PreviewData not ready', 1600);
+                    return;
+                }
+                const drafts = PreviewData.get();
+                const blob = new Blob([JSON.stringify(drafts, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'preview_drafts.json';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }
+        );
+        exportBtn.classList.add('dev-only');
+        wrap.appendChild(exportBtn);
+
+        host.appendChild(wrap);
+
+        // Small hint text
+        const hint = document.createElement('div');
+        hint.style.cssText = 'margin-top:6px;font-size:11px;opacity:.85;color:#cfcfcf;';
+        hint.textContent = 'Note: The inline editor opens only for Preview drafts.';
+        host.appendChild(hint);
+    }
+
+    document.addEventListener('DOMContentLoaded', mountEditorTools);
+})();
+
 (function () {
   // =========================
   // (A) DRAFT STORAGE + EDIT
@@ -342,24 +438,7 @@
                   }
               }));
 
-              // --- Duplicate to Preview ---
-              wrap.appendChild(mk('Duplicate to Preview', 'Duplicate current/selected event into the Preview theme', () => {
-                  if (!window.EditorPreviewOps || typeof EditorPreviewOps.duplicateFromEventId !== 'function') {
-                      alert('Duplicate feature not available (EditorPreviewOps missing).');
-                      return;
-                  }
-                  let id = findSelectedEventId() || (f.id?.value || '').trim();
-                  if (!id) id = prompt('Enter the ID of the event to duplicate to Preview:');
-                  if (!id) return;
-
-                  const dup = EditorPreviewOps.duplicateFromEventId(id);
-                  if (dup) {
-                      editor.dataset.lastDupId = dup.id;
-                      showToast(`Duplicated: ${dup.label}`);
-                  } else {
-                      alert('Duplicate failed. Check console for details.');
-                  }
-              }));
+              // EN: Duplicate-to-Preview is triggered from the event InfoBox flow now. v49.71
 
               // --- Delete draft (Preview) ---
               wrap.appendChild(mk('Delete draft', 'Remove the last duplicated preview (or choose id)', () => {
@@ -547,13 +626,22 @@
 
       setupAdvancedFields();
 
-    // Listen to InfoBox → "Edit event"
-    window.addEventListener('timeline:edit-event', (e) => {
-      const ev = e?.detail?.event;
-      if (ev) openEditor(ev);
-    });
+      // Listen to InfoBox → "Edit event"
+      // EN: Editor opens ONLY for Preview events. Everything else must go through the Preview flow.
+      window.addEventListener('timeline:edit-event', (e) => {
+          const ev = e?.detail?.event;
+          if (!ev) return;
+
+          if (ev.theme !== 'preview') {
+              // EN: Keep this strict to avoid editing base events by accident.
+              if (window.showToast) window.showToast('Editor opens only for Preview drafts. Duplicate to Preview first.', 2200);
+              else console.warn('[editor] Edit blocked: only preview drafts can be edited.', ev);
+              return;
+          }
+
+          openEditor(ev);
+      });
   }
-    // Legacy bottom tray editor UI removed; editor tools will be hosted in InfoBox.
 
 })();
 
@@ -1080,26 +1168,64 @@
             ? `<div class="body">${comments}</div>`
             : `<div class="body" style="opacity:.8;">(No notes)</div>`;
 
+        // EN: Only preview events are directly editable. Base events can be duplicated into Preview first.
+        const isPreview = (ev?.theme === 'preview');
+
+        const actionsHtml = isPreview
+            ? `<button class="edit-event" type="button" aria-label="Edit event">Edit event</button>`
+            : `<button class="dup-to-preview" type="button" aria-label="Duplicate to Preview for editing">Duplicate to Preview for editing</button>`;
+
         return `
-      <div class="title">${label}</div>
-      <div class="meta">${meta}</div>
-      ${body}${linkHtml}
-      <div class="actions">
-        <button class="edit-event" type="button" aria-label="Edit event">Edit event</button>
-      </div>`;
+    <div class="title">${label}</div>
+    <div class="meta">${meta}</div>
+    ${body}${linkHtml}
+    <div class="actions">
+    ${actionsHtml}
+    </div>`;
     }
 
     function show(ev, screenBox) {
         __lastUserIntentTs = 0;
         const el = ensureInfoEl();
         el.innerHTML = buildEventHTML(ev);
-        const btn = el.querySelector('.edit-event');
-        if (btn) {
-            btn.addEventListener('click', (e) => {
+        // EN: Preview events: open editor. Base events: duplicate into Preview.
+        const editBtn = el.querySelector('.edit-event');
+        if (editBtn) {
+            editBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 window.dispatchEvent(new CustomEvent('timeline:edit-event', { detail: { event: ev } }));
             });
         }
+
+        const dupBtn = el.querySelector('.dup-to-preview');
+        if (dupBtn) {
+            dupBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+
+                if (!window.EditorPreviewOps || typeof window.EditorPreviewOps.duplicateFromEventId !== 'function') {
+                    alert('Duplicate feature not available (EditorPreviewOps.duplicateFromEventId missing).');
+                    return;
+                }
+                if (!ev?.id) {
+                    alert('Cannot duplicate: event has no id.');
+                    return;
+                }
+
+                const dup = window.EditorPreviewOps.duplicateFromEventId(ev.id);
+                // EN: Ensure Preview is visible and selected after duplication.
+                document.body.classList.add('editor-controls-open');     // makes Preview card visible (your CSS gate)
+                if (window.TimelineAPI?.selectTheme) {
+                    try { window.TimelineAPI.selectTheme('preview'); } catch (_) { }
+                }
+                if (window.rerenderTimeline) window.rerenderTimeline();
+
+                // EN: After duplicating, bring Preview theme to front (user can then tap the draft to edit).
+                if (dup && window.TimelineAPI?.selectTheme) {
+                    try { window.TimelineAPI.selectTheme('preview'); } catch (_) { }
+                }
+            });
+        }
+
         el.classList.remove('is-visible');
         el.style.visibility = 'hidden';
         el.style.opacity = '0';
@@ -1208,15 +1334,25 @@
     const titles = svg?.querySelectorAll('text.card-title') || [];
     const midY = window.innerHeight / 2;
     let nearest = null, bestDist = Infinity;
-    titles.forEach(t => {
-      const r = t.getBoundingClientRect(); const cy = r.top + r.height * 0.5;
-      const d = Math.abs(cy - midY);
-      if (d < bestDist) { bestDist = d; nearest = { el: t, x: r.left + r.width * 0.5, y: cy, theme: t.textContent.trim() }; }
-    });
+        titles.forEach(t => {
+            const name = (t.textContent || '').trim();
+            // EN: Never auto-select the Preview theme during the startup intro.
+            if (name.toLowerCase() === 'preview') return;
+
+            const r = t.getBoundingClientRect();
+            const cy = r.top + r.height * 0.5;
+            const d = Math.abs(cy - midY);
+            if (d < bestDist) {
+                bestDist = d;
+                nearest = { el: t, x: r.left + r.width * 0.5, y: cy, theme: name };
+            }
+        });
     const target = nearest || { x: window.innerWidth / 2, y: midY, theme: null };
     moveTouchCursor(cursor, target.x, target.y, true);
     await sleep(520); tapRipple(target.x, target.y);
-    if (target.theme && api.selectTheme) { api.selectTheme(target.theme); }
+        if (target.theme && api.selectTheme && String(target.theme).toLowerCase() !== 'preview') {
+            api.selectTheme(target.theme);
+        }
     moveTouchCursor(cursor, target.x, target.y, false);
     await sleep(1000);
 

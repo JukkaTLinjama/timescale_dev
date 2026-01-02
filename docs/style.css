@@ -594,6 +594,21 @@ g.active-layer text.event-label {
     background: #333;
     border-color: #777;
 }
+#event-info .actions .dup-to-preview {
+    font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #666;
+    background: #2a2a2a;
+    color: #ffd399;
+    cursor: pointer;
+}
+
+#event-info .actions .dup-to-preview:hover {
+    background: #333;
+    border-color: #777;
+}
+
 /* --- v47.4: inline event editor --- */
 #event-editor {
     position: fixed;
@@ -631,6 +646,15 @@ body.editor-controls-open .dev-only {
 
 body.debug-on .dev-only {
     display: block;
+}
+
+/* EN: Hide Preview theme card by default. Show it only when editor controls are enabled. */
+body:not(.editor-controls-open) #timeline g.card[data-theme="preview"] {
+    display: none;
+}
+
+body.editor-controls-open #timeline g.card[data-theme="preview"] {
+    display: inline;
 }
 
 /* Mobile: stack editor header + actions to avoid overlap */
