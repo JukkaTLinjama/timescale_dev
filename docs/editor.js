@@ -50,6 +50,53 @@
         };
     }
 })();
+// --- DraftSession: strict "one target theme at a time" ------------------------
+// EN: Drafts live in PreviewData (theme="preview"), but we keep session metadata here.
+(function () {
+    const KEY = 'ts_draft_session_v1';
+
+    function emptySession() {
+        return {
+            targetThemeName: null, // EN: user-chosen label for export/apply later
+            sourceTheme: null,     // EN: base theme from first duplicated event (strict mixing guard)
+            createdAt: null
+        };
+    }
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(KEY);
+            if (!raw) return emptySession();
+            const obj = JSON.parse(raw);
+            if (!obj || typeof obj !== 'object') return emptySession();
+            return {
+                targetThemeName: typeof obj.targetThemeName === 'string' ? obj.targetThemeName : null,
+                sourceTheme: typeof obj.sourceTheme === 'string' ? obj.sourceTheme : null,
+                createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : null
+            };
+        } catch {
+            return emptySession();
+        }
+    }
+
+    function save(s) {
+        try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { }
+    }
+
+    function reset() {
+        const s = emptySession();
+        try { localStorage.removeItem(KEY); } catch { }
+        return s;
+    }
+
+    // EN: Expose as window.DraftSession (minimal API)
+    let state = load();
+    window.DraftSession = {
+        get: () => state,
+        set: (next) => { state = next; save(state); },
+        reset: () => { state = reset(); return state; }
+    };
+})();
 
 // --- InfoBox: mount Editor tools into the "?" panel ---------------------------
 // EN: This replaces the old bottom tray UX. The tools live inside #info-box.
@@ -103,8 +150,9 @@
                 }
                 if (confirm('Clear all preview drafts?')) {
                     PreviewData.clear();
+                    if (window.DraftSession && DraftSession.reset) DraftSession.reset();
                     if (window.rerenderTimeline) window.rerenderTimeline();
-                    if (window.showToast) window.showToast('Cleared all preview drafts', 1600);
+                    if (window.showToast) window.showToast('Draft session cleared', 1600);
                 }
             }
         );
@@ -121,11 +169,28 @@
                     return;
                 }
                 const drafts = PreviewData.get();
-                const blob = new Blob([JSON.stringify(drafts, null, 2)], { type: 'application/json' });
+                const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+                const bundle = {
+                    kind: 'timescale-draft-bundle',
+                    version: 1,
+                    targetThemeName: sess.targetThemeName || null,
+                    sourceTheme: sess.sourceTheme || null,
+                    createdAt: sess.createdAt || null,
+                    exportedAt: new Date().toISOString(),
+                    events: drafts
+                };
+
+                const safeName = (bundle.targetThemeName || 'draft').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60);
+                const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'preview_drafts.json';
+                a.download = `${safeName}_draft_bundle.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
@@ -655,16 +720,7 @@
     const PREVIEW_COLOR = '#f59e0b';
 
     // Default test card (you can remove/replace via PreviewData.set([...]))
-    let _list = [{
-        id: 'preview-1',
-        theme: PREVIEW_THEME,
-        label: 'Preview — test card',
-        comments: 'A minimal sample event rendered in the Preview theme.',
-        // age in years from "now" → ~6 months
-        time_years: 0.5,
-        previewStatus: 'added',
-        edited_at: new Date().toISOString()
-    }];
+    let _list = [];
 
     // --- Draft label helpers (for consistent "draft: theme - label") ---
     function formatDraftLabel(origTheme, baseLabel) {
@@ -684,13 +740,18 @@
         const themes = Array.isArray(b.themes) ? b.themes : [];
         const themeColors = { ...(b.themeColors || {}) };
 
+        const hasPreview = Array.isArray(_list) && _list.length > 0;
+
         const out = {
             meta: b.meta || {},
-            events: events.concat(_list),
-            themes: Array.from(new Set([...themes, PREVIEW_THEME])),
+            events: hasPreview ? events.concat(_list) : events.slice(),
+            themes: hasPreview ? Array.from(new Set([...themes, PREVIEW_THEME])) : themes.slice(),
             themeColors
         };
-        if (!out.themeColors[PREVIEW_THEME]) out.themeColors[PREVIEW_THEME] = PREVIEW_COLOR;
+
+        // Only define preview color if preview theme is actually present.
+        if (hasPreview && !out.themeColors[PREVIEW_THEME]) out.themeColors[PREVIEW_THEME] = PREVIEW_COLOR;
+
         return out;
     }
 
@@ -1206,23 +1267,50 @@
                     alert('Duplicate feature not available (EditorPreviewOps.duplicateFromEventId missing).');
                     return;
                 }
-                if (!ev?.id) {
+                if (!window.PreviewData || !PreviewData.get || !PreviewData.set) {
+                    alert('PreviewData not available.');
+                    return;
+                }
+                if (!ev || !ev.id) {
                     alert('Cannot duplicate: event has no id.');
                     return;
                 }
 
-                const dup = window.EditorPreviewOps.duplicateFromEventId(ev.id);
-                // EN: Ensure Preview is visible and selected after duplication.
-                document.body.classList.add('editor-controls-open');     // makes Preview card visible (your CSS gate)
-                if (window.TimelineAPI?.selectTheme) {
-                    try { window.TimelineAPI.selectTheme('preview'); } catch (_) { }
-                }
-                if (window.rerenderTimeline) window.rerenderTimeline();
+                const list = PreviewData.get();
+                const isEmpty = !Array.isArray(list) || list.length === 0;
+                const baseTheme = (ev.theme || '').trim() || 'unknown';
 
-                // EN: After duplicating, bring Preview theme to front (user can then tap the draft to edit).
-                if (dup && window.TimelineAPI?.selectTheme) {
-                    try { window.TimelineAPI.selectTheme('preview'); } catch (_) { }
+                let sess = (window.DraftSession && DraftSession.get)
+                    ? DraftSession.get()
+                    : { targetThemeName: null, sourceTheme: null, createdAt: null };
+
+                if (isEmpty) {
+                    const name = prompt('Start draft session.\nDraft theme name (for export/apply later):', baseTheme);
+                    if (name == null) return;
+                    const trimmed = String(name).trim();
+                    if (!trimmed) {
+                        if (window.showToast) window.showToast('Theme name required', 1800);
+                        return;
+                    }
+                    sess = { targetThemeName: trimmed, sourceTheme: baseTheme, createdAt: new Date().toISOString() };
+                    if (window.DraftSession && DraftSession.set) DraftSession.set(sess);
+                    if (window.showToast) window.showToast(`Draft session started: ${sess.targetThemeName}`, 1800);
+                } else {
+                    if (sess && sess.sourceTheme && sess.sourceTheme !== baseTheme) {
+                        if (window.showToast) window.showToast(`Draft session is for "${sess.sourceTheme}". Clear drafts to switch.`, 2400);
+                        return;
+                    }
+                    if (sess && sess.targetThemeName && window.showToast) {
+                        window.showToast(`Added to draft: ${sess.targetThemeName}`, 1600);
+                    }
                 }
+
+                window.EditorPreviewOps.duplicateFromEventId(ev.id);
+
+                // Ensure Preview becomes visible and active
+                document.body.classList.add('editor-controls-open');
+                try { window.TimelineAPI?.selectTheme && window.TimelineAPI.selectTheme('preview'); } catch (_) { }
+                if (window.rerenderTimeline) window.rerenderTimeline();
             });
         }
 
