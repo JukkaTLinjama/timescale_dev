@@ -168,13 +168,22 @@
                     if (window.showToast) window.showToast('PreviewData not ready', 1600);
                     return;
                 }
-                const drafts = PreviewData.get();
                 const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+
+                // EN: Ensure each exported draft has draftTargetTheme (deterministic import/apply later)
+                const drafts = (PreviewData.get() || []).map(e => ({
+                    ...e,
+                    draftTargetTheme: (e && e.draftTargetTheme) ? e.draftTargetTheme : (sess.targetThemeName || null),
+                    sourceTheme: (e && e.sourceTheme) ? e.sourceTheme : (e && e.previewSource && e.previewSource.theme) ? e.previewSource.theme : null
+                }));
+
                 const bundle = {
                     kind: 'timescale-draft-bundle',
-                    version: 1,
-                    targetThemeName: sess.targetThemeName || null,
-                    sourceTheme: sess.sourceTheme || null,
+                    version: 2,
+
+                    // EN: New canonical key (matches per-event field)
+                    draftTargetTheme: sess.targetThemeName || null,
+
                     createdAt: sess.createdAt || null,
                     exportedAt: new Date().toISOString(),
                     events: drafts
@@ -190,13 +199,72 @@
                 a.click();
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
             }
         );
+
+        // (4) Import preview drafts (dev-only)
+        const importBtn = mkBtn(
+            'Import drafts',
+            'Load a draft bundle JSON and replace current Preview drafts',
+            () => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = 'application/json';
+
+                inp.onchange = async () => {
+                    const file = inp.files && inp.files[0];
+                    if (!file) return;
+
+                    const txt = await file.text();
+                    let bundle = null;
+                    try { bundle = JSON.parse(txt); } catch {
+                        alert('Invalid JSON');
+                        return;
+                    }
+
+                    // EN: Accept both old (targetThemeName) and new (draftTargetTheme) keys
+                    const draftTargetTheme = bundle.draftTargetTheme || bundle.targetThemeName || null;
+
+                    // EN: Normalize events → always preview + always have provenance fields
+                    const events = Array.isArray(bundle.events) ? bundle.events : [];
+                    const normalized = events.map(e => ({
+                        ...e,
+                        theme: 'preview',
+                        draftTargetTheme: (e && e.draftTargetTheme) ? e.draftTargetTheme : draftTargetTheme,
+                        sourceTheme: (e && e.sourceTheme)
+                            ? e.sourceTheme
+                            : (e && e.previewSource && e.previewSource.theme)
+                                ? e.previewSource.theme
+                                : null
+                    }));
+
+                    if (window.PreviewData && PreviewData.set) {
+                        PreviewData.set(normalized);
+                    } else {
+                        alert('PreviewData not ready.');
+                        return;
+                    }
+
+                    // EN: Update session target theme to match imported bundle
+                    if (window.DraftSession && DraftSession.set) {
+                        const prev = DraftSession.get ? DraftSession.get() : {};
+                        DraftSession.set({
+                            targetThemeName: draftTargetTheme,
+                            sourceTheme: prev && prev.sourceTheme ? prev.sourceTheme : null,
+                            createdAt: (bundle.createdAt || prev.createdAt || new Date().toISOString())
+                        });
+                    }
+
+                    window.rerenderTimeline?.();
+                    window.showToast?.('Draft bundle imported', 1600);
+                };
+
+                inp.click();
+            }
+        );
+        importBtn.classList.add('dev-only');
+        wrap.appendChild(importBtn);
+
         exportBtn.classList.add('dev-only');
         wrap.appendChild(exportBtn);
 
@@ -237,6 +305,22 @@
       createdAt: document.getElementById('edit-created-at')
     };
     const closeBtn = document.getElementById('close-editor');
+    // EN: The per-event "theme" field is an internal implementation detail ("preview").
+    // Hide/lock it in the editor UI to avoid confusing the user.
+    (function lockAndHideThemeField() {
+        if (!f.theme) return;
+
+        // Lock (defensive)
+        try {
+            f.theme.readOnly = true;
+            f.theme.disabled = true;
+            f.theme.title = 'Internal field. Drafts are staged in "preview".';
+        } catch { }
+
+        // Hide the whole row (label + input)
+        const row = f.theme.closest('.field');
+        if (row) row.style.display = 'none';
+    })();
 
     function asCSV(v) { return Array.isArray(v) ? v.join(', ') : (v ?? ''); }
     function str(v) { return (v == null ? '' : String(v)); }
@@ -284,12 +368,36 @@
 
         f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.info ?? ev?.body ?? '';
         f.theme.value = ev?.theme ?? '';
+        // EN: Hide the raw "Theme" form field for preview drafts.
+        // We show the intended target theme in the header badge instead.
+        (function syncThemeFieldVisibility() {
+            const isPreview = (ev?.theme === 'preview');
+
+            const themeInput = f.theme;
+            const themeLabel = themeInput?.previousElementSibling;
+            const labelEl = (themeLabel && themeLabel.tagName === 'LABEL') ? themeLabel : null;
+
+            if (isPreview) {
+                if (labelEl) labelEl.style.display = 'none';
+                if (themeInput) {
+                    themeInput.style.display = 'none';
+                    themeInput.disabled = true; // prevent accidental edits
+                }
+            } else {
+                // Restore for non-preview events (optional)
+                if (labelEl) labelEl.style.display = '';
+                if (themeInput) {
+                    themeInput.style.display = '';
+                    themeInput.disabled = false;
+                }
+            }
+        })();
 
         // EN: Show source ID for clarity (read-only field in HTML).
         f.id.value = str(ev?.id ?? ev?._id ?? '');
         f.id.dataset.sourceId = (ev?.previewSource?.id || f.id.value);
 
-        // ---------- Theme badge in editor header: "draft: <theme>" for preview drafts ----------
+        // ---------- Theme badge in editor header: show DRAFT TARGET (and optional source) ----------
         (function ensureThemeBadge() {
             const header = editor.querySelector('.editor-header') || editor;
 
@@ -308,8 +416,30 @@
             }
 
             const isPreview = ev?.theme === 'preview';
-            const orig = ev?.previewOriginalTheme || ev?.previewSource?.theme || DraftUI.parseDraftThemeFromLabel(ev?.label) || '';
-            badge.textContent = isPreview && orig ? `Theme: draft: ${orig}` : `Theme: ${ev?.theme || '—'}`;
+
+            // EN: Draft target theme = where this draft is intended to end up (NOT "preview")
+            const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+            const target = ev?.draftTargetTheme || sess?.targetThemeName || '';
+
+            // EN: Source theme = where the event was copied from
+            const src = ev?.sourceTheme
+                || ev?.previewOriginalTheme
+                || ev?.previewSource?.theme
+                || DraftUI.parseDraftThemeFromLabel(ev?.label)
+                || '';
+
+            if (isPreview) {
+                // If you want the cleanest UI: show only target.
+                // badge.textContent = target ? `Theme: draft: ${target}` : 'Theme: draft';
+
+                // Slightly more informative: show "(from ...)" when it differs.
+                if (target && src && target !== src) badge.textContent = `Theme: draft: ${target} (from ${src})`;
+                else if (target) badge.textContent = `Theme: draft: ${target}`;
+                else if (src) badge.textContent = `Theme: draft: ${src}`;
+                else badge.textContent = 'Theme: draft';
+            } else {
+                badge.textContent = `Theme: ${ev?.theme || '—'}`;
+            }
         })();
 
       const link = extractLink(ev);
@@ -601,10 +731,13 @@
 
           function markAsAdvBit(inputEl) {
               if (!inputEl) return;
-              // Find its label by [for=id]
-              const id = inputEl.id;
-              const label = id ? editor.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
-              // We'll hide both the input and its label (separately), not the whole row.
+
+              // EN: In this editor layout, labels do NOT use `for=""`.
+              // The DOM order is: <label> ... </label> then <input ...>.
+              // So the safest way is to grab the previousElementSibling if it is a LABEL.
+              const prev = inputEl.previousElementSibling;
+              const label = (prev && prev.tagName === 'LABEL') ? prev : null;
+
               if (label) advBits.push(label);
               advBits.push(inputEl);
           }
@@ -799,6 +932,23 @@
     }
 
     function duplicateFromEventId(eventId, overrides = {}) {
+        // EN: Ensure we have a draft target theme before creating preview drafts.
+        // Ask once when starting a new draft session.
+        let sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : null;
+        if (!sess || !sess.targetThemeName) {
+            const suggested = (window.DEFAULT_DRAFT_TARGET_THEME || '').trim();
+            const name = prompt('Draft target theme name?', suggested || 'historia');
+            if (!name) return { ok: false, reason: 'cancelled' };
+
+            DraftSession.set({
+                targetThemeName: name.trim(),
+                sourceTheme: null, // EN: no longer used as a guard; can stay null
+                createdAt: new Date().toISOString()
+            });
+
+            sess = DraftSession.get();
+        }
+
         if (!eventId) { console.warn('[Duplicate] Missing eventId'); return null; }
         if (!window.PreviewData || typeof PreviewData.get !== 'function' || typeof PreviewData.set !== 'function') {
             console.warn('[Duplicate] PreviewData not available (editor.js must load before prepare/timeline).');
@@ -894,10 +1044,22 @@
             return [];
         })();
 
+        // EN: Build draft label from TARGET theme (not source theme)
+        const targetTheme = sess?.targetThemeName || '';
+
+        // EN: Remove any existing "draft: X - " prefix from base label
+        const baseLabelClean = (base.label || '')
+            .replace(/^draft:\s*[^-]+-\s*/i, '')
+            .trim();
+
+        const draftLabel = targetTheme
+            ? `draft: ${targetTheme} - ${baseLabelClean} (copy)`
+            : `${baseLabelClean} (copy)`;
+
         const dup = {
             id: newId,
             theme: 'preview',                    // stays in preview for visualization
-            label: previewLabel,                 // "draft: <theme> - <label>"
+            label: draftLabel,                 // "draft: <theme> - <label>"
             comments: overrides.comments ?? (base.comments || base.info || ''),
             time_years: tY,
             year: dupYear,
@@ -909,6 +1071,9 @@
             previewStatus: 'added',
             previewSource: { id: base.id, theme: origTheme },
             previewOriginalTheme: origTheme,     // used when exporting/committing
+            // EN: Session + provenance metadata for cross-theme draft workflows
+            draftTargetTheme: (window.DraftSession && DraftSession.get && DraftSession.get().targetThemeName) ? DraftSession.get().targetThemeName : null,
+            sourceTheme: origTheme,
             editor: overrides.editor || 'user',
             edited_at: new Date().toISOString(),
             display: overrides.display ?? base.display ?? undefined,
@@ -1119,6 +1284,9 @@
             existing.i18n = (overrides.i18n != null)
                 ? overrides.i18n
                 : (existing.i18n ?? base.i18n ?? undefined);
+            // EN: Keep cross-theme provenance on the draft
+            existing.draftTargetTheme = (window.DraftSession && DraftSession.get) ? (DraftSession.get().targetThemeName || null) : (existing.draftTargetTheme || null);
+            existing.sourceTheme = origTheme || existing.sourceTheme || null;
 
             PreviewData.set(list);
             return { ok: true, created: false, draft: existing };
@@ -1154,6 +1322,10 @@
             tags: tagsVal,
             previewSource: { id: base.id, theme: origTheme },
             previewOriginalTheme: origTheme,
+            // EN: Cross-theme draft session metadata
+            draftTargetTheme: (window.DraftSession && DraftSession.get) ? (DraftSession.get().targetThemeName || null) : null,
+            sourceTheme: origTheme,
+
             created_by: overrides.created_by || undefined,
             created_at: overrides.created_at || undefined,
             updated_at: overrides.updated_at || new Date().toISOString(),
@@ -1296,10 +1468,6 @@
                     if (window.DraftSession && DraftSession.set) DraftSession.set(sess);
                     if (window.showToast) window.showToast(`Draft session started: ${sess.targetThemeName}`, 1800);
                 } else {
-                    if (sess && sess.sourceTheme && sess.sourceTheme !== baseTheme) {
-                        if (window.showToast) window.showToast(`Draft session is for "${sess.sourceTheme}". Clear drafts to switch.`, 2400);
-                        return;
-                    }
                     if (sess && sess.targetThemeName && window.showToast) {
                         window.showToast(`Added to draft: ${sess.targetThemeName}`, 1600);
                     }
