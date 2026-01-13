@@ -189,7 +189,10 @@
                     events: drafts
                 };
 
-                const safeName = (bundle.targetThemeName || 'draft').replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60);
+                // EN: Bundle uses draftTargetTheme as the canonical key (v2+)
+                const safeName = (bundle.draftTargetTheme || 'draft')
+                    .replace(/[^a-z0-9_-]+/gi, '_')
+                    .slice(0, 60);
                 const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -262,6 +265,59 @@
                 inp.click();
             }
         );
+        // (5) Rename draft target theme (dev-only)
+        const renameBtn = mkBtn(
+            'Rename draft target…',
+            'Rename the active draft target theme and update all Preview drafts',
+            () => {
+                const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+                const current = (sess?.targetThemeName || '').trim();
+                const next = prompt('New draft target theme name:', current || 'historia');
+                if (next == null) return;
+
+                const newName = String(next).trim();
+                if (!newName) {
+                    window.showToast?.('Theme name required', 1600);
+                    return;
+                }
+
+                // Update session
+                if (window.DraftSession && DraftSession.set) {
+                    DraftSession.set({
+                        targetThemeName: newName,
+                        sourceTheme: sess?.sourceTheme || null,
+                        createdAt: sess?.createdAt || new Date().toISOString()
+                    });
+                }
+
+                // Update all preview drafts
+                if (window.PreviewData && PreviewData.get && PreviewData.set) {
+                    const list = PreviewData.get() || [];
+                    const updated = list.map(e => {
+                        if (!e || e.theme !== 'preview') return e;
+
+                        const oldLabel = String(e.label || '');
+                        const core = (window.DraftUI && DraftUI.stripDraftLabel)
+                            ? DraftUI.stripDraftLabel(oldLabel)
+                            : oldLabel.replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+
+                        return {
+                            ...e,
+                            draftTargetTheme: newName,
+                            label: `draft: ${newName} - ${core}`
+                        };
+                    });
+
+                    PreviewData.set(updated);
+                    window.rerenderTimeline?.();
+                }
+
+                window.showToast?.(`Draft target renamed: ${newName}`, 1800);
+            }
+        );
+        renameBtn.classList.add('dev-only');
+        wrap.appendChild(renameBtn);
+
         importBtn.classList.add('dev-only');
         wrap.appendChild(importBtn);
 
@@ -1372,7 +1428,33 @@
     function buildEventHTML(ev) {
         const label = ev?.display_label || ev?.label || 'Event';
         const when = (ev?.display_when || ev?.display_ago || (ev?.year ?? '').toString());
-        const meta = [when, ev?.theme ? `Theme: ${ev.theme}` : null].filter(Boolean).join(' · ');
+        // EN: Show draft target theme for Preview drafts (instead of literal "preview")
+        const isPreviewDraft = (ev?.theme === 'preview');
+
+        // EN: Resolve target theme (event-level wins; session is fallback)
+        const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+        const targetTheme =
+            (ev?.draftTargetTheme || sess?.targetThemeName || '').toString().trim();
+
+        // EN: Resolve source theme (optional, for "(from X)" label)
+        const sourceTheme =
+            (ev?.sourceTheme ||
+                ev?.previewOriginalTheme ||
+                ev?.previewSource?.theme ||
+                '').toString().trim();
+
+        // EN: Build a user-facing theme label
+        let themeLabel = '';
+        if (isPreviewDraft) {
+            if (targetTheme && sourceTheme && targetTheme !== sourceTheme) themeLabel = `Theme: draft: ${targetTheme} (from ${sourceTheme})`;
+            else if (targetTheme) themeLabel = `Theme: draft: ${targetTheme}`;
+            else if (sourceTheme) themeLabel = `Theme: draft: ${sourceTheme}`;
+            else themeLabel = 'Theme: draft';
+        } else {
+            themeLabel = ev?.theme ? `Theme: ${ev.theme}` : '';
+        }
+
+        const meta = [when, themeLabel].filter(Boolean).join(' · ');
 
         const comments = (typeof ev?.display_comments === 'string' && ev.display_comments.trim().length > 0)
             ? ev.display_comments.trim()
