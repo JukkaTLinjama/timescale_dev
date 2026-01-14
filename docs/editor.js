@@ -320,6 +320,145 @@
 
         importBtn.classList.add('dev-only');
         wrap.appendChild(importBtn);
+        // (4.5) Commit preview drafts into a NEW theme (dev-only)
+        const commitBtn = mkBtn(
+            'Commit drafts…',
+            'Create/update a theme and move Preview drafts into it (updates __BASE_PACK)',
+            () => {
+                try {
+                    if (!window.__BASE_PACK) {
+                        alert('Base pack not ready (__BASE_PACK missing). Reload once and try again.');
+                        return;
+                    }
+                    if (!window.PreviewData || typeof PreviewData.get !== 'function' || typeof PreviewData.set !== 'function') {
+                        alert('PreviewData not ready.');
+                        return;
+                    }
+
+                    const drafts = PreviewData.get() || [];
+                    if (!drafts.length) {
+                        alert('No preview drafts to commit.');
+                        return;
+                    }
+
+                    // EN: Suggested name: bundle/session target, otherwise fallback
+                    const sess = (window.DraftSession && typeof DraftSession.get === 'function') ? DraftSession.get() : {};
+                    const suggested =
+                        (drafts[0] && drafts[0].draftTargetTheme) ||
+                        (sess && sess.targetThemeName) ||
+                        'new theme';
+
+                    const newTheme = (prompt('Commit drafts into theme name:', suggested) || '').trim();
+                    if (!newTheme) return;
+
+                    // EN: Ensure meta + theme definition exists
+                    const base = window.__BASE_PACK;
+                    base.meta = base.meta || {};
+                    base.meta.themes = base.meta.themes || {};
+
+                    // EN: If theme is new, initialize it. Keep existing definitions if present.
+                    if (!base.meta.themes[newTheme]) {
+                        // EN: Keep theme definitions consistent with existing schema
+                        base.meta.themes[newTheme] = { color: '#70a8c6', label: newTheme };
+                    }
+
+                    // EN: Ensure theme lists contain it
+                    base.themes = Array.isArray(base.themes) ? base.themes : [];
+                    if (!base.themes.includes(newTheme)) base.themes.push(newTheme);
+
+                    base.themeColors = base.themeColors || {};
+                    if (!base.themeColors[newTheme]) {
+                        const c = base.meta.themes[newTheme] && base.meta.themes[newTheme].color;
+                        if (c) base.themeColors[newTheme] = c;
+                    }
+
+                    // EN: Transform preview drafts -> committed events
+                    const committed = drafts.map(d => {
+                        const out = { ...d };
+                        // EN: Normalize label for committed events: remove "draft: X - " prefix and " (copy)" suffix
+                        const rawLabel = String(out.label || out.display_label || '').trim();
+                        let core = rawLabel.replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+                        core = core.replace(/\s*\(copy\)\s*$/i, '').trim();
+                        out.label = core;
+
+                        // Move into the new theme
+                        out.theme = newTheme;
+
+                        // Remove preview-only metadata (keep provenance only if you want)
+                        delete out.draftTargetTheme;
+                        delete out.previewSource;
+                        // If you do NOT want provenance, also remove sourceTheme:
+                        delete out.sourceTheme;
+
+                        return out;
+                    });
+
+                    // EN: Upsert by id within the target theme (remove old copies with same id+theme)
+                    const keep = (base.events || []).filter(e => {
+                        if (!e) return false;
+                        if (e.theme === 'present') return true;          // keep present overlay inside runtime pack
+                        if (e.theme === 'preview') return true;          // should not exist in base, but keep if it does
+                        // remove old event if it collides with a committed (same id + same theme)
+                        return !committed.some(c => c && c.id && e.id === c.id && e.theme === newTheme);
+                    });
+
+                    base.events = keep.concat(committed);
+
+                    // EN: Optionally clear preview after commit
+                    const clear = confirm('Clear preview drafts after commit?');
+                    if (clear) PreviewData.set([]);
+
+                    window.rerenderTimeline?.();
+                    window.showToast?.(`Committed ${committed.length} draft(s) → ${newTheme}`, 1800);
+                } catch (e) {
+                    console.error('[CommitDrafts] failed:', e);
+                    alert('Commit failed. See console.');
+                }
+            }
+        );
+        commitBtn.classList.add('dev-only');
+        wrap.appendChild(commitBtn);
+
+        // (4.6) Export updated DB as JSON (dev-only)
+        const exportDbBtn = mkBtn(
+            'Export eventsDB…',
+            'Download a full eventsDB JSON (meta + flat events) from current __BASE_PACK (excludes present/preview)',
+            () => {
+                try {
+                    if (!window.__BASE_PACK) {
+                        alert('Base pack not ready (__BASE_PACK missing).');
+                        return;
+                    }
+                    const base = window.__BASE_PACK;
+                    const meta = base.meta || {};
+
+                    // EN: Export only real events (exclude runtime-only layers)
+                    // EN: Export full events as-is (preserve schema); exclude runtime-only layers
+                    const events = (base.events || []).filter(e =>
+                        e && e.theme !== 'present' && e.theme !== 'preview'
+                    );
+
+                    const db = { meta, events };
+
+                    const txt = JSON.stringify(db, null, 2);
+                    const blob = new Blob([txt], { type: 'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'eventsDB45.updated.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+                    window.showToast?.(`Exported ${events.length} events`, 1600);
+                } catch (e) {
+                    console.error('[ExportDB] failed:', e);
+                    alert('Export failed. See console.');
+                }
+            }
+        );
+        exportDbBtn.classList.add('dev-only');
+        wrap.appendChild(exportDbBtn);
 
         exportBtn.classList.add('dev-only');
         wrap.appendChild(exportBtn);
