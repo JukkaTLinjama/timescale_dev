@@ -22,7 +22,7 @@
       - “Edit event” in InfoBox dispatches window event: `timeline:edit-event`
     -->
     <meta charset="UTF-8">
-        <title>History Timeline v49.92  </title>
+        <title>History Timeline v50  </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -32,7 +32,7 @@
 <body>
     <h1 id="page-title">
         History at your fingertips — Big Bang to 2025
-        <span style="font-size:0.65em; color:#9e9d9d;">v49.92 </span>
+        <span style="font-size:0.65em; color:#9e9d9d;">v50 </span>
     </h1>
 
     <div id="info-toggle">?</div>
@@ -878,6 +878,8 @@
                 const res = await fetch('eventsDB45.json', { cache: 'no-store' });
                 if (!res.ok) throw new Error('eventsDB45.json not found');
                 const json = await res.json();
+                window.__BASE_EVENTSDB = json; // canonical DB snapshot for editor export/commit
+
                 // EN: Keep an untouched copy of the loaded DB so editor tools can export a full updated DB.
                 // This avoids trying to reconstruct the original schema from TS_DATA (which contains computed fields).
                 window.__BASE_DB45_JSON = json;

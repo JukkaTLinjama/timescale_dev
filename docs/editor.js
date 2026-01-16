@@ -422,37 +422,31 @@
         // (4.6) Export updated DB as JSON (dev-only)
         const exportDbBtn = mkBtn(
             'Export eventsDB…',
-            'Download a full eventsDB JSON (meta + flat events) from current __BASE_PACK (excludes present/preview)',
+            'Download the canonical eventsDB JSON as loaded (no merge, no filtering)',
             () => {
                 try {
-                    if (!window.__BASE_PACK) {
-                        alert('Base pack not ready (__BASE_PACK missing).');
+                    // EN: Export ONLY the canonical DB snapshot exactly as it was loaded from disk.
+                    // EN: No merging, no filtering, no schema changes.
+                    const base = window.__BASE_EVENTSDB;
+                    if (!base) {
+                        alert('Canonical DB not available (window.__BASE_EVENTSDB missing).');
                         return;
                     }
-                    const base = window.__BASE_PACK;
-                    const meta = base.meta || {};
 
-                    // EN: Export only real events (exclude runtime-only layers)
-                    // EN: Export full events as-is (preserve schema); exclude runtime-only layers
-                    const events = (base.events || []).filter(e =>
-                        e && e.theme !== 'present' && e.theme !== 'preview'
-                    );
-
-                    const db = { meta, events };
-
-                    const txt = JSON.stringify(db, null, 2);
+                    const txt = JSON.stringify(base, null, 2);
                     const blob = new Blob([txt], { type: 'application/json' });
+
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(blob);
-                    a.download = 'eventsDB45.updated.json';
+                    a.download = 'eventsDB.json';
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 
-                    window.showToast?.(`Exported ${events.length} events`, 1600);
+                    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                    window.showToast?.('Exported canonical eventsDB.json', 1600);
                 } catch (e) {
-                    console.error('[ExportDB] failed:', e);
+                    console.error('[ExportCanonicalDB] failed:', e);
                     alert('Export failed. See console.');
                 }
             }
