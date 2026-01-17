@@ -557,27 +557,33 @@
 
         f.desc.value = ev?.display_comments ?? ev?.comments ?? ev?.info ?? ev?.body ?? '';
         f.theme.value = ev?.theme ?? '';
-        // EN: Hide the raw "Theme" form field for preview drafts.
-        // We show the intended target theme in the header badge instead.
+        // EN: For preview drafts, repurpose the "Theme" input to edit draftTargetTheme.
+        // EN: Do NOT touch the header badge here (badge is handled in ensureThemeBadge()).
         (function syncThemeFieldVisibility() {
             const isPreview = (ev?.theme === 'preview');
 
             const themeInput = f.theme;
-            const themeLabel = themeInput?.previousElementSibling;
-            const labelEl = (themeLabel && themeLabel.tagName === 'LABEL') ? themeLabel : null;
+            const themeLabelEl = themeInput?.previousElementSibling;
+            const labelEl = (themeLabelEl && themeLabelEl.tagName === 'LABEL') ? themeLabelEl : null;
+
+            const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+            const target = (ev?.draftTargetTheme || sess?.targetThemeName || '').trim();
 
             if (isPreview) {
-                if (labelEl) labelEl.style.display = 'none';
-                if (themeInput) {
-                    themeInput.style.display = 'none';
-                    themeInput.disabled = true; // prevent accidental edits
-                }
-            } else {
-                // Restore for non-preview events (optional)
-                if (labelEl) labelEl.style.display = '';
+                if (labelEl) labelEl.textContent = 'Draft target theme';
                 if (themeInput) {
                     themeInput.style.display = '';
                     themeInput.disabled = false;
+                    themeInput.value = target;
+                    themeInput.dataset.role = 'draftTargetTheme';
+                }
+            } else {
+                if (labelEl) labelEl.textContent = 'Theme';
+                if (themeInput) {
+                    themeInput.style.display = '';
+                    themeInput.disabled = false;
+                    themeInput.value = ev?.theme ?? '';
+                    delete themeInput.dataset.role;
                 }
             }
         })();
@@ -618,14 +624,10 @@
                 || '';
 
             if (isPreview) {
-                // If you want the cleanest UI: show only target.
-                // badge.textContent = target ? `Theme: draft: ${target}` : 'Theme: draft';
-
-                // Slightly more informative: show "(from ...)" when it differs.
-                if (target && src && target !== src) badge.textContent = `Theme: draft: ${target} (from ${src})`;
-                else if (target) badge.textContent = `Theme: draft: ${target}`;
-                else if (src) badge.textContent = `Theme: draft: ${src}`;
-                else badge.textContent = 'Theme: draft';
+                // EN: Keep header badge clean for drafts: show only the target theme.
+                badge.textContent = target
+                    ? `Theme: draft: ${target}`
+                    : 'Theme: draft';
             } else {
                 badge.textContent = `Theme: ${ev?.theme || '—'}`;
             }
@@ -729,8 +731,14 @@
           const created_by = (f.createdBy?.value || '').trim();
           const created_at = (f.createdAt?.value || '').trim();
 
+          // EN: If the theme field is repurposed for drafts, read draftTargetTheme from it.
+          const draftTargetTheme = (f.theme?.dataset?.role === 'draftTargetTheme')
+              ? (f.theme.value || '').trim()
+              : '';
+
           return {
               label,
+              draftTargetTheme,
               display_label: label,
               comments,
               year: yearNum,
@@ -794,10 +802,24 @@
                   if (!baseId) return;
 
                   const form = getData();
+                  // EN: If editing a preview draft, allow changing its draftTargetTheme via the repurposed field.
+                  const isPreviewEdit = (f.theme?.dataset?.role === 'draftTargetTheme');
+                  const nextTarget = (form.draftTargetTheme || '').trim();
 
                   // Build overrides; we compute time_years from year/date inside upsert
                   const overrides = {
-                      label: form.label,
+                      label: (function () {
+                          if (!isPreviewEdit) return form.label;
+
+                          // EN: Keep labels consistent with the target theme prefix.
+                          const oldLabel = String(form.label || '');
+                          const core = (window.DraftUI && DraftUI.stripDraftLabel)
+                              ? DraftUI.stripDraftLabel(oldLabel)
+                              : oldLabel.replace(/^draft:\s*[^-]+-\s*/i, '').trim();
+
+                          return nextTarget ? `draft: ${nextTarget} - ${core}` : oldLabel;
+                      })(),
+                      draftTargetTheme: (isPreviewEdit && nextTarget) ? nextTarget : undefined,
                       display_label: form.display_label,
                       comments: form.comments,
                       year: form.year,       // may be undefined; upsert will interpret
@@ -819,6 +841,14 @@
                       showToast(res.created ? `Draft created: ${res.draft.label}` : `Draft updated: ${res.draft.label}`);
                   } else {
                       alert('Preview save failed. See console for details.');
+                      if (isPreviewEdit && nextTarget && window.DraftSession?.set) {
+                          const prev = DraftSession.get ? DraftSession.get() : {};
+                          DraftSession.set({
+                              targetThemeName: nextTarget,
+                              sourceTheme: prev?.sourceTheme || null,
+                              createdAt: prev?.createdAt || new Date().toISOString()
+                          });
+                      }
                   }
               }));
 
