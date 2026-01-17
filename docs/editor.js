@@ -501,14 +501,12 @@
 
         // Lock (defensive)
         try {
-            f.theme.readOnly = true;
-            f.theme.disabled = true;
             f.theme.title = 'Internal field. Drafts are staged in "preview".';
         } catch { }
 
-        // Hide the whole row (label + input)
+        // EN: Do not hide the row; preview drafts repurpose this field to edit draftTargetTheme.
         const row = f.theme.closest('.field');
-        if (row) row.style.display = 'none';
+        if (row) row.style.display = '';
     })();
 
     function asCSV(v) { return Array.isArray(v) ? v.join(', ') : (v ?? ''); }
@@ -837,10 +835,7 @@
                   const res = EditorPreviewOps.upsertFromEventId(baseId, overrides);
                   if (res && res.ok && res.draft) {
                       editor.dataset.lastDupId = res.draft.id; // remember for Delete
-                      window.rerenderTimeline?.();
-                      showToast(res.created ? `Draft created: ${res.draft.label}` : `Draft updated: ${res.draft.label}`);
-                  } else {
-                      alert('Preview save failed. See console for details.');
+                      // EN: Update DraftSession only after a successful draft save.
                       if (isPreviewEdit && nextTarget && window.DraftSession?.set) {
                           const prev = DraftSession.get ? DraftSession.get() : {};
                           DraftSession.set({
@@ -849,6 +844,10 @@
                               createdAt: prev?.createdAt || new Date().toISOString()
                           });
                       }
+                      window.rerenderTimeline?.();
+                      showToast(res.created ? `Draft created: ${res.draft.label}` : `Draft updated: ${res.draft.label}`);
+                  } else {
+                      alert('Preview save failed. See console for details.');
                   }
               }));
 
@@ -1081,7 +1080,19 @@
         return `draft: ${theme} - ${core}`;
     }
 
-    function set(list) { _list = Array.isArray(list) ? list.slice() : []; }
+    function set(list) {
+        _list = Array.isArray(list) ? list.slice() : [];
+
+        // EN: Invariant — preview drafts must always carry draftTargetTheme.
+        const sess = (window.DraftSession && DraftSession.get) ? DraftSession.get() : {};
+        const fallbackTarget = (sess && sess.targetThemeName) ? String(sess.targetThemeName).trim() : '';
+
+        for (const ev of _list) {
+            if (!ev || ev.theme !== 'preview') continue;
+            if (!ev.draftTargetTheme && fallbackTarget) ev.draftTargetTheme = fallbackTarget;
+        }
+    }
+
     function clear() { _list = []; }
     function get() { return _list.slice(); }
 
@@ -1310,11 +1321,6 @@
 
         return dup;
     }
-
-    // Extend existing API without clobbering prior helpers
-    window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
-        duplicateFromEventId
-    });
 
     // Extend existing API without clobbering prior helpers
     window.EditorPreviewOps = Object.assign({}, window.EditorPreviewOps || {}, {
@@ -1609,10 +1615,9 @@
         // EN: Build a user-facing theme label
         let themeLabel = '';
         if (isPreviewDraft) {
-            if (targetTheme && sourceTheme && targetTheme !== sourceTheme) themeLabel = `Theme: draft: ${targetTheme} (from ${sourceTheme})`;
-            else if (targetTheme) themeLabel = `Theme: draft: ${targetTheme}`;
-            else if (sourceTheme) themeLabel = `Theme: draft: ${sourceTheme}`;
-            else themeLabel = 'Theme: draft';
+            themeLabel = targetTheme
+                ? `Theme: draft: ${targetTheme}`
+                : 'Theme: draft';
         } else {
             themeLabel = ev?.theme ? `Theme: ${ev.theme}` : '';
         }
