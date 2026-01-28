@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Vibro L/R Beat Keyboard (A=440)</title>
+    <style>
+        :root {
+            --gap: 10px;
+            --white-h: 220px;
+            --black-h: 140px;
+            --white-w: 1fr;
+            --radius: 14px;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #fafafa;
+            color: #111;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 10px 0;
+            font-weight: 650;
+        }
+
+        .row {
+            margin: 12px 0;
+        }
+
+        .controls {
+            display: grid;
+            gap: 10px;
+            padding: 12px;
+            background: #fff;
+            border: 1px solid #e6e6e6;
+            border-radius: 12px;
+        }
+
+        .control {
+            display: grid;
+            grid-template-columns: 160px 1fr auto;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .control input[type="range"] {
+            width: 100%;
+        }
+
+        .val {
+            font-variant-numeric: tabular-nums;
+            font-size: 13px;
+            opacity: 0.85;
+            min-width: 70px;
+            text-align: right;
+        }
+
+        .btns {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 12px;
+            border: 1px solid #d0d0d0;
+            border-bottom-width: 3px;
+            border-radius: 12px;
+            background: #fff;
+            font-size: 14px;
+        }
+
+        button:active {
+            transform: translateY(1px);
+            border-bottom-width: 2px;
+        }
+
+        /* --- Piano keyboard --- */
+        .kbdWrap {
+            margin-top: 14px;
+            padding: 14px;
+            background: #fff;
+            border: 1px solid #e6e6e6;
+            border-radius: 12px;
+            overflow: hidden;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .kbdTitle {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: baseline;
+            margin-bottom: 10px;
+            font-size: 13px;
+            opacity: 0.85;
+        }
+
+        .piano {
+            position: relative;
+            width: 100%;
+            height: var(--white-h);
+            display: grid;
+            grid-template-columns: repeat(7, var(--white-w));
+            /* A B C D E F G */
+            gap: 0;
+            border: 1px solid #ddd;
+            border-radius: var(--radius);
+            background: #f2f2f2;
+            overflow: hidden;
+        }
+
+        .whiteKey {
+            position: relative;
+            border-right: 1px solid #ddd;
+            background: linear-gradient(#ffffff, #f1f1f1);
+            height: var(--white-h);
+            padding: 0;
+            margin: 0;
+            border-radius: 0;
+            border-left: none;
+            border-top: none;
+            border-bottom: none;
+            border-right: 1px solid #ddd;
+            touch-action: none;
+        }
+
+        .whiteKey:last-child {
+            border-right: none;
+        }
+
+        .whiteKey.active {
+            background: linear-gradient(#f1f1f1, #e6e6e6);
+        }
+
+        .whiteKey .label {
+            position: absolute;
+            left: 8px;
+            bottom: 10px;
+            font-size: 12px;
+            opacity: 0.8;
+            line-height: 1.1;
+            text-align: left;
+            pointer-events: none;
+        }
+
+        .whiteKey .hz {
+            display: block;
+            font-variant-numeric: tabular-nums;
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .blackKey {
+            position: absolute;
+            top: 0;
+            width: calc(100% / 7 * 0.4);
+            height: var(--black-h);
+            background: linear-gradient(#3a3a3a, #111);
+            border: 1px solid #000;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            z-index: 10;
+            padding: 0;
+            touch-action: none;
+        }
+
+        .blackKey.active {
+            background: linear-gradient(#2a2a2a, #000);
+        }
+
+        .blackKey .label {
+            position: absolute;
+            left: 8px;
+            bottom: 10px;
+            color: #fff;
+            font-size: 11px;
+            opacity: 0.9;
+            line-height: 1.1;
+            pointer-events: none;
+        }
+
+        .blackKey .hz {
+            display: block;
+            font-variant-numeric: tabular-nums;
+            font-size: 10px;
+            opacity: 0.75;
+            margin-top: 3px;
+        }
+
+        .hint {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.75;
+        }
+
+        @media (max-width: 360px){
+        .keybed{ width: 385px; } /* 7 * 55px */
+        .whiteKey{ width:55px; }
+        .blackKey{ width:32px; }
+        }
+
+    </style>
+</head>
+
+<body>
+    <h1>Vibro L/R Beat Keyboard (A=440, tactile freqs)</h1>
+
+    <div class="row controls">
+        <div class="btns">
+            <button id="startBtn" type="button">Start</button>
+            <button id="stopBtn" type="button">Stop</button>
+        </div>
+
+        <div class="control">
+            <label for="masterVol">Master Volume (0–0.2)</label>
+            <input id="masterVol" type="range" min="0" max="0.2" step="0.001" value="0.06" />
+            <span class="val" id="masterVal"></span>
+        </div>
+
+        <div class="control">
+            <label for="beatHz">L/R Beat Offset (Hz)</label>
+            <input id="beatHz" type="range" min="0" max="1" step="0.01" value="0.25" />
+            <span class="val" id="beatVal"></span>
+        </div>
+
+        <div class="control">
+            <label for="glideS">Glide (s)</label>
+            <input id="glideS" type="range" min="0" max="5" step="0.05" value="2.0" />
+            <span class="val" id="glideVal"></span>
+        </div>
+    </div>
+
+    <div class="row kbdWrap">
+        <div class="kbdTitle">
+            <div><strong>One Octave:</strong> A0–G1 (+ accidentals)</div>
+            <div><strong>Sound:</strong> sine L/R, fR = fL + beat</div>
+        </div>
+
+        <div id="piano" class="piano" aria-label="Virtual piano keyboard"></div>
+
+        <div class="hint">
+            Touch/hold a key to play. Slide to another key for glides. Output is intentionally low-frequency; keep
+            volume conservative.
+        </div>
+    </div>
+
+    <script>
+        // ---------- Audio state ----------
+        let ctx;
+        let oscL, oscR;
+        let gainL, gainR;
+        let merger;
+        let masterGain;
+        let gateGain;
+
+        const state = {
+            running: false,
+            beatHz: 0.25,     // L/R frequency offset in Hz (controls beat period)
+            glideS: 2.0,
+            masterVol: 0.06,
+            baseHz: 27.5
+        };
+
+        function now() { return ctx.currentTime; }
+
+        function setParamSmooth(param, target, glideS) {
+            const t0 = now();
+            param.cancelScheduledValues(t0);
+            param.setValueAtTime(param.value, t0);
+            param.linearRampToValueAtTime(target, t0 + Math.max(0, glideS));
+        }
+
+        /**
+         * L/R beat control:
+         * fL = baseHz
+         * fR = baseHz + beatHz
+         * Keeping the inter-channel offset constant (Hz) preserves the beat period during glides.
+         */
+        function updateFrequencies(glide = true) {
+            const g = glide ? state.glideS : 0;
+            const fL = state.baseHz;
+            const fR = state.baseHz + state.beatHz;
+
+            setParamSmooth(oscL.frequency, fL, g);
+            setParamSmooth(oscR.frequency, fR, g);
+        }
+
+        function updateMasterVolume() {
+            if (!masterGain) return;
+            masterGain.gain.setValueAtTime(state.masterVol, now());
+        }
+
+        function setGate(on) {
+            if (!gateGain) return;
+            const t0 = now();
+            gateGain.gain.cancelScheduledValues(t0);
+            gateGain.gain.setValueAtTime(gateGain.gain.value, t0);
+            gateGain.gain.linearRampToValueAtTime(on ? 1.0 : 0.0, t0 + 0.02);
+        }
+
+        async function start() {
+            if (state.running) return;
+
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+            oscL = ctx.createOscillator();
+            oscR = ctx.createOscillator();
+            oscL.type = "sine";
+            oscR.type = "sine";
+
+            gainL = ctx.createGain();
+            gainR = ctx.createGain();
+            gainL.gain.value = 0.9;
+            gainR.gain.value = 0.9;
+
+            merger = ctx.createChannelMerger(2);
+
+            masterGain = ctx.createGain();
+            masterGain.gain.value = state.masterVol;
+
+            gateGain = ctx.createGain();
+            gateGain.gain.value = 0.0; // off until a key is pressed
+
+            oscL.connect(gainL);
+            gainL.connect(merger, 0, 0);
+
+            oscR.connect(gainR);
+            gainR.connect(merger, 0, 1);
+
+            merger.connect(masterGain);
+            masterGain.connect(gateGain);
+            gateGain.connect(ctx.destination);
+
+            // Start at current base frequency without glide
+            updateFrequencies(false);
+
+            oscL.start();
+            oscR.start();
+
+            state.running = true;
+        }
+
+        function stop() {
+            if (!state.running) return;
+
+            const t0 = now();
+            oscL.stop(t0);
+            oscR.stop(t0);
+
+            ctx.close();
+
+            state.running = false;
+            ctx = null;
+        }
+
+        function setBaseHz(hz) {
+            state.baseHz = hz; // no clamp
+            if (state.running) updateFrequencies(true);
+        }
+
+        // ---------- UI bindings ----------
+        function bindUI() {
+            const $ = (id) => document.getElementById(id);
+
+            const masterVol = $("masterVol");
+            const beatHz = $("beatHz");
+            const glideS = $("glideS");
+
+            function refreshLabels() {
+                $("masterVal").textContent = `${Number(state.masterVol).toFixed(3)}`;
+                $("beatVal").textContent = `${Number(state.beatHz).toFixed(2)}`;
+                $("glideVal").textContent = `${Number(state.glideS).toFixed(2)}`;
+            }
+
+            masterVol.addEventListener("input", () => {
+                state.masterVol = Number(masterVol.value);
+                refreshLabels();
+                if (state.running) updateMasterVolume();
+            });
+
+            beatHz.addEventListener("input", () => {
+                state.beatHz = Number(beatHz.value);
+                refreshLabels();
+                if (state.running) updateFrequencies(true);
+            });
+
+            glideS.addEventListener("input", () => {
+                state.glideS = Number(glideS.value);
+                refreshLabels();
+            });
+
+            $("startBtn").addEventListener("click", start);
+            $("stopBtn").addEventListener("click", stop);
+
+            refreshLabels();
+        }
+
+        bindUI();
+
+        // ---------- Virtual piano (A=440, equal temperament) ----------
+        const A0 = 27.5;
+        const SEMITONE = Math.pow(2, 1 / 12);
+
+        function hzForSemitoneFromA0(n) {
+            return A0 * Math.pow(SEMITONE, n);
+        }
+
+        // White keys: A B C D E F G (in this register: A0 B0 C1 D1 E1 F1 G1)
+        const whiteKeys = [
+            { note: "A0", n: 0 },
+            { note: "B0", n: 2 },
+            { note: "C1", n: 3 },
+            { note: "D1", n: 5 },
+            { note: "E1", n: 7 },
+            { note: "F1", n: 8 },
+            { note: "G1", n: 10 }
+        ];
+
+        // Black keys positions (between whites): A# C# D# F# G#
+        // Each has an anchor index referencing the left white key column.
+        const blackKeys = [
+            { note: "A#0", n: 1, leftWhiteIndex: 0 },
+            { note: "C#1", n: 4, leftWhiteIndex: 2 },
+            { note: "D#1", n: 6, leftWhiteIndex: 3 },
+            { note: "F#1", n: 9, leftWhiteIndex: 5 },
+            { note: "G#1", n: 11, leftWhiteIndex: 6 }
+        ];
+
+        function buildPiano() {
+            const piano = document.getElementById("piano");
+            piano.innerHTML = "";
+
+            // Add white keys as grid children
+            for (const wk of whiteKeys) {
+                const hz = hzForSemitoneFromA0(wk.n);
+
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "whiteKey";
+                btn.dataset.hz = String(hz);
+                btn.dataset.note = wk.note;
+
+                const label = document.createElement("div");
+                label.className = "label";
+                label.innerHTML = `<span>${wk.note}</span><span class="hz">${hz.toFixed(2)} Hz</span>`;
+                btn.appendChild(label);
+
+                attachKeyHandlers(btn, hz);
+
+                piano.appendChild(btn);
+            }
+
+            // Add black keys as absolute positioned elements
+            // Compute width per white key based on container width (after layout).
+            requestAnimationFrame(() => {
+                const rect = piano.getBoundingClientRect();
+                const whiteW = rect.width / 7;
+
+                // Mustan koskettimen leveys suhteessa whiteW:hen.
+                // Pidä tämä linjassa CSS:n 0.48 kanssa.
+                const blackW = whiteW * 0.48;
+
+                for (const bk of blackKeys) {
+                    const hz = hzForSemitoneFromA0(bk.n);
+
+                    const btn = document.createElement("button");
+                    btn.type = "button";
+                    btn.className = "blackKey";
+                    btn.dataset.hz = String(hz);
+                    btn.dataset.note = bk.note;
+
+                    // Center black key between two white keys:
+                    // boundary at (leftWhiteIndex + 1) * whiteW, then shift left by half black width.
+                    const left = (bk.leftWhiteIndex + 1) * whiteW - (blackW / 2);
+
+                    btn.style.left = `${left}px`;
+                    btn.style.width = `${blackW}px`; // override CSS width reliably
+
+                    const label = document.createElement("div");
+                    label.className = "label";
+                    label.innerHTML = `<span>${bk.note}</span><span class="hz">${hz.toFixed(2)} Hz</span>`;
+                    btn.appendChild(label);
+
+                    attachKeyHandlers(btn, hz);
+                    piano.appendChild(btn);
+                }
+            });
+
+            // Rebuild on resize to keep black-key positions accurate
+            window.addEventListener("resize", () => buildPiano(), { passive: true });
+        }
+
+        // Pointer tracking: allow "slide to another key" by moving finger
+        let activePointerId = null;
+        let activeEl = null;
+
+        function attachKeyHandlers(el, hz) {
+            const down = async (e) => {
+                e.preventDefault();
+
+                if (activePointerId !== null && activePointerId !== e.pointerId) return;
+
+                activePointerId = e.pointerId;
+                activeEl = el;
+                el.classList.add("active");
+
+                if (!state.running) await start();
+
+                setBaseHz(hz);
+                setGate(true);
+
+                try { el.setPointerCapture(e.pointerId); } catch (_) { }
+            };
+
+            const up = (e) => {
+                e.preventDefault();
+                if (activePointerId !== e.pointerId) return;
+
+                if (activeEl) activeEl.classList.remove("active");
+                activeEl = null;
+                activePointerId = null;
+
+                setGate(false);
+            };
+
+            const move = (e) => {
+                if (activePointerId !== e.pointerId) return;
+
+                // Hit-test under finger; switch key if different
+                const x = e.clientX;
+                const y = e.clientY;
+                const under = document.elementFromPoint(x, y);
+
+                if (!under) return;
+
+                const keyEl = under.classList?.contains("whiteKey") || under.classList?.contains("blackKey")
+                    ? under
+                    : under.closest?.(".whiteKey, .blackKey");
+
+                if (!keyEl || keyEl === activeEl) return;
+
+                const newHz = Number(keyEl.dataset.hz);
+                if (!Number.isFinite(newHz)) return;
+
+                if (activeEl) activeEl.classList.remove("active");
+                activeEl = keyEl;
+                activeEl.classList.add("active");
+
+                setBaseHz(newHz); // glide happens here
+            };
+
+            el.addEventListener("pointerdown", down, { passive: false });
+            el.addEventListener("pointerup", up, { passive: false });
+            el.addEventListener("pointercancel", up, { passive: false });
+            el.addEventListener("pointermove", move, { passive: false });
+            el.addEventListener("pointerleave", (e) => {
+                // If pointer capture is active, we still get moves; ignore leave.
+                // If not captured, releasing outside should stop sound.
+                if (activePointerId === null) return;
+            }, { passive: true });
+        }
+
+        buildPiano();
+    </script>
+</body>
+
+</html>
